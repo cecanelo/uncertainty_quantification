@@ -1,0 +1,88 @@
+study:
+    name: "uq_auxue_posthoc_v1"
+    storage: "sqlite:///optuna_studies/hpo.db"
+    direction: "minimize"
+    resume: true
+
+budget:
+    n_trials: 20
+
+resources:
+    partition: "STUD"          # change to your GPU partition if different
+    time: "00:50:00"
+    mem_gb: 8
+    cpus_per_task: 4
+    gpus: 1
+    max_parallel: 2
+
+io:
+    # These are relative to the repo root (same level as scripts/, configs/, etc.)
+    outputs_root: "outputs/optuna"
+    logs_root: "logs"
+    job_name_template: "{study}_{ts}_{jobid}"
+    trial_dir_template: "trial_{trial:05d}"
+
+base_config:
+    # AuxUE training config (post-hoc, using frozen base predictions)
+    train_config_path: "uncertainty_quatification/configs/train_aux.yaml"
+    # AuxUE training script
+    train_script_path: "uncertainty_quatification/scripts/train_aux.py"
+
+repro:
+    snapshot_hpo_config: true
+    snapshot_base_config: true
+    save_pip_freeze: false
+    save_git_commit: false
+
+# Search space tailored to AuxUE (Decision 15):
+# - trunk widths / dropout
+# - LR
+# - KL weight
+# - aleatoric weight
+# - batch size
+search_space:
+    - name: "training.lr"
+      dist: "loguniform"
+      low: 1.0e-5
+      high: 2.0e-3
+
+    - name: "training.batch_size"
+      dist: "choice"
+      choices: [1024, 2048, 4096]
+
+    - name: "model.ale_hidden_dims"
+      dist: "choice"
+      choices:
+          - [512, 256]
+          - [768, 384]
+          - [256, 256]
+
+    - name: "model.dido_hidden_dims"
+      dist: "choice"
+      choices:
+          - [512, 256]
+          - [768, 384]
+          - [256, 256]
+
+    - name: "model.dropout"
+      dist: "uniform"
+      low: 0.00
+      high: 0.30
+      step: 0.05
+
+    - name: "auxue.lambda_kl"
+      dist: "loguniform"
+      low: 1.0e-5
+      high: 1.0e-2
+
+    - name: "auxue.w_ale"
+      dist: "uniform"
+      low: 0.5
+      high: 2.0
+      step: 0.1
+
+post_run:
+    export_best: true
+    best_dirname: "best"
+    best_filename: "best_hparams.json"
+    latest_pointer_dir: "outputs/optuna/{study}/best"

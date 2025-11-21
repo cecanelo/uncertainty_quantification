@@ -1,0 +1,35 @@
+{
+    "timestamp": "20251120-1706",
+    "job_tag": "prune2_new_ds_base_point_20251120-1706",
+    "config_path": "/home/canelo/uncertainty_quantification/configs/hpo_base.yaml",
+    "study": {
+        "name": "prune2_new_ds_base_point",
+        "storage": "sqlite:///optuna_studies/hpo.db",
+        "direction": "minimize",
+        "resume": true
+    },
+    "budget": {
+        "n_trials": 50
+    },
+    "resources": {
+        "partition": "STUD",
+        "time": "00:30:00",
+        "mem_gb": 32,
+        "cpus_per_task": 2,
+        "gpus": 1,
+        "max_parallel": 4
+    },
+    "io": {
+        "outputs_root": "outputs/optuna",
+        "logs_root": "logs",
+        "job_name_template": "{study}_{ts}",
+        "trial_dir_template": "trial_{trial:05d}"
+    },
+    "base_config": {
+        "train_config_path": "configs/train_base.yaml",
+        "train_script_path": "scripts/train_regression.py"
+    },
+    "notes": "",
+    "hpo_config_sha256": "8cc06812ac5bf03942454b9cdb0bab3f9859fe852b0b10bf74ae06060c80626a",
+    "base_config_sha256": "2a4e492af86c91e4869348b45272c50dfc51943470a97a8c06e884b965dd54fb"
+}

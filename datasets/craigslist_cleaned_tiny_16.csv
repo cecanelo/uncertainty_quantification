@@ -1,0 +1,17 @@
+,region,price,year,manufacturer,model,condition,cylinders,fuel,odometer,title_status,transmission,drive,type,paint_color,state,lat,long,posting_date,posting_date_formatted,quarter
+236814,raleigh / durham / ch,3490,2001,honda,civic sdn dx manual,excellent,4 cylinders,gas,153436,not_available,manual,not_available,sedan,not_available,nc,38.217782,-77.50965,2021-04-23 22:48:00,2021-04-23 22:48:24,Y2021Q2
+274180,rochester,0,2013,ford,edge,not_available,6 cylinders,gas,106330,clean,automatic,not_available,not_available,not_available,ny,43.20047,-77.571994,2021-04-07 12:57:00,2021-04-07 12:57:08,Y2021Q2
+163215,"kansas city, mo",29500,1972,chevrolet,corvette,not_available,8 cylinders,gas,42900,clean,automatic,not_available,not_available,not_available,ks,33.6372,-96.6184,2021-04-23 00:17:00,2021-04-23 00:17:50,Y2021Q2
+31622,inland empire,4200,2001,ram,1500,good,6 cylinders,gas,158000,clean,automatic,not_available,pickup,black,ca,33.9761,-117.3389,2021-04-28 14:53:00,2021-04-28 14:53:52,Y2021Q2
+134732,spokane / coeur d'alene,10488,2012,hyundai,sonata,not_available,4 cylinders,gas,96530,clean,automatic,not_available,sedan,not_available,id,47.656773,-117.218613,2021-04-29 14:30:00,2021-04-29 14:30:21,Y2021Q2
+13245,sierra vista,25990,2010,missing,hummer h3,not_available,5 cylinders,other,90147,clean,automatic,4wd,not_available,not_available,az,32.24951,-110.972417,2021-05-04 12:12:00,2021-05-04 12:12:29,Y2021Q2
+22991,bakersfield,47995,2015,chevrolet,silverado 2500hd,not_available,8 cylinders,diesel,94850,clean,automatic,4wd,not_available,red,ca,34.070311,-117.446303,2021-04-05 17:32:00,2021-04-05 17:32:14,Y2021Q2
+69197,yuba-sutter,9499,2006,honda,cr-v ex se,excellent,4 cylinders,gas,117829,clean,automatic,4wd,suv,not_available,ca,39.123441,-121.61144,2021-04-23 00:15:00,2021-04-23 00:15:54,Y2021Q2
+328932,pittsburgh,32999,2015,ford,f350,excellent,8 cylinders,diesel,130586,clean,automatic,4wd,pickup,not_available,pa,41.038965,-81.575742,2021-04-29 13:15:00,2021-04-29 13:15:28,Y2021Q2
+53285,san diego,21900,2021,chevrolet,equinox,not_available,4 cylinders,gas,2962,clean,automatic,not_available,suv,black,ca,32.6266,-117.068,2021-05-04 01:15:00,2021-05-04 01:15:33,Y2021Q2
+7491,anchorage / mat-su,24995,2015,bmw,328i gt xdrive awd,excellent,4 cylinders,gas,31818,clean,automatic,4wd,hatchback,silver,ak,61.21778,-149.870092,2021-04-05 22:53:00,2021-04-05 22:53:59,Y2021Q2
+216027,joplin,14925,2015,chevrolet,malibu,good,4 cylinders,gas,73000,clean,automatic,fwd,sedan,black,mo,37.0969,-94.5051,2021-04-16 15:22:00,2021-04-16 15:22:36,Y2021Q2
+5850,anchorage / mat-su,9995,2007,honda,cr-v,not_available,4 cylinders,gas,154722,clean,automatic,4wd,suv,not_available,ak,61.16167,-149.86312,2021-04-24 23:13:00,2021-04-24 23:13:21,Y2021Q2
+242438,las vegas,1950,2003,hyundai,elantra,good,4 cylinders,gas,85000,clean,automatic,not_available,sedan,red,nv,36.150892,-115.313572,2021-04-30 06:02:00,2021-04-30 06:02:57,Y2021Q2
+11253,phoenix,17590,2015,nissan,altima 2.5 sl sedan 4d,good,missing,gas,29293,clean,other,fwd,sedan,red,az,33.5,-112.05,2021-05-03 15:51:00,2021-05-03 15:51:12,Y2021Q2
+383112,harrisonburg,16950,2019,honda,fit ex,excellent,4 cylinders,gas,13948,clean,automatic,fwd,hatchback,silver,va,38.473341,-78.871603,2021-04-12 17:05:00,2021-04-12 17:05:09,Y2021Q2

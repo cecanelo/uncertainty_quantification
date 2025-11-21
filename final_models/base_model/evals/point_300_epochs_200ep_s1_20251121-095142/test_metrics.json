@@ -1,0 +1,12 @@
+{
+    "head_type": "point",
+    "objective_name": "val_mae_orig",
+    "best_epoch": 235,
+    "test": {
+        "mae": 2472.16748046875,
+        "rmse": 5613.41015625,
+        "loss": 2470.750244140625,
+        "mae_orig": 2472.16748046875,
+        "rmse_orig": 5613.41015625
+    }
+}

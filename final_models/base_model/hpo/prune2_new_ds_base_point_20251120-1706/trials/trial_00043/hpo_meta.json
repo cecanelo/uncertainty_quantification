@@ -1,0 +1,15 @@
+{
+    "optuna": {
+        "trial_number": 43,
+        "study_name": "prune2_new_ds_base_point"
+    },
+    "slurm": {
+        "job_id": "282893",
+        "array_id": 43,
+        "node": "stud-000"
+    },
+    "io": {
+        "trial_dir": "/home/canelo/uncertainty_quantification/outputs/optuna/prune2_new_ds_base_point_20251120-1706/trials/trial_00043",
+        "logs_root": "logs"
+    }
+}
