@@ -3,3 +3,5 @@ datasets/craigslist_used_cars_full.csv
 __pycache__/
 *.pyc
 .ipynb_checkpoints/
+logs/
+outputs/
