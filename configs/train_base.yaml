@@ -6,7 +6,7 @@ slurm:
     mem_gb: 32
     cpus: 4
     gpus: 1
-    job_name: "point_200epochs"
+    job_name: "base_point"
     conda_env: "thesis"
 
 data:

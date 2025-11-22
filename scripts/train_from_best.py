@@ -148,13 +148,38 @@ def main() -> None:
     # --- Load and tweak config in memory ---
     cfg = yaml.safe_load(cfg_path.read_text())
 
-    # Optional: override number of epochs from CLI
+    # --- Overlay best trial hyperparameters from best_hparams.json ---
+    # payload["params"] contains keys like "training.lr", "model.hidden_dims", etc.
+    best_params = payload.get("params", {}) or {}
+
+    for full_key, val in best_params.items():
+        # full_key examples: "training.lr", "model.hidden_dims"
+        if "." not in full_key:
+            continue
+        section, key = full_key.split(".", 1)
+
+        # If user overrides epochs via CLI, let CLI win later
+        if section == "training" and key == "epochs" and args.epochs is not None:
+            continue
+
+        cfg.setdefault(section, {})
+        cfg[section][key] = val
+
+    # --- Optional: override number of epochs from CLI ---
     if args.epochs is not None:
         train_cfg = cfg.get("training", {}) or {}
         prev_epochs = train_cfg.get("epochs")
         train_cfg["epochs"] = int(args.epochs)
         cfg["training"] = train_cfg
         print(f"[train_from_best] Overriding training.epochs: {prev_epochs} -> {args.epochs}")
+
+    # --- Optional: override seed from CLI ---
+    if args.seed is not None:
+        cfg["seed"] = int(args.seed)
+        cfg.setdefault("data", {})
+        cfg["data"]["split_seed"] = int(args.seed)
+        print(f"[train_from_best] Overriding seed + split_seed -> {args.seed}")
+
 
     # --- SLURM resources: allow config defaults, overridden by CLI ---
     slurm_cfg = cfg.get("slurm", {}) or {}
@@ -236,12 +261,12 @@ def main() -> None:
         logs_dir = repo_root / "logs"
         logs_dir.mkdir(parents=True, exist_ok=True)
 
-        # Log filenames: training_<job_name>_<timestamp>.{out,err}
+        # Log filenames: training_<job_name>_<timestamp>_<JOBID>.{out,err}
         safe_job_name = job_name.replace(" ", "_")
         log_stub = f"training_{safe_job_name}_{ts}"
-        out_log = logs_dir / f"{log_stub}.out"
-        err_log = logs_dir / f"{log_stub}.err"
-
+        # %j is expanded by SLURM to the job id
+        out_log = logs_dir / f"{log_stub}_%j.out"
+        err_log = logs_dir / f"{log_stub}_%j.err"
 
         sbatch_script = f"""#!/bin/bash
 #SBATCH --job-name={job_name}
@@ -259,9 +284,10 @@ source "$HOME/miniconda3/etc/profile.d/conda.sh"
 conda activate {conda_env}
 
 echo "[env] host=$(hostname) date=$(date)"
-echo "[env] RUN_DIR={training_outdir}"
+echo "[env] RUN_DIR={training_outdir}_${{SLURM_JOB_ID}}"
 
-{sys.executable} scripts/train_regression.py --config "{derived_cfg_path}" --outdir "{training_outdir}"
+{sys.executable} scripts/train_regression.py --config "{derived_cfg_path}" --outdir "{training_outdir}_${{SLURM_JOB_ID}}"
+
 """
         print("[train_from_best] Submitting sbatch with script:")
         print(sbatch_script)
