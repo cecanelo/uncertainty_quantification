@@ -1,0 +1,15 @@
+{
+    "optuna": {
+        "trial_number": 94,
+        "study_name": "base_point_2"
+    },
+    "slurm": {
+        "job_id": "284537",
+        "array_id": 94,
+        "node": "stud-000"
+    },
+    "io": {
+        "trial_dir": "/home/canelo/uncertainty_quantification/outputs/optuna/base_point_2_20251122-1307/trials/trial_00094",
+        "logs_root": "logs"
+    }
+}

@@ -1,0 +1,16 @@
+{
+    "training.epochs": 100,
+    "training.lr": 0.0023147689220578394,
+    "training.weight_decay": 2.498932811283341e-06,
+    "training.grad_clip": 0.0,
+    "model.hidden_dims": [
+        768,
+        384,
+        192
+    ],
+    "model.dropout": 0.1,
+    "model.activation": "relu",
+    "model.batchnorm": true,
+    "data.batch_size": 1024,
+    "training.point_loss": "mse"
+}

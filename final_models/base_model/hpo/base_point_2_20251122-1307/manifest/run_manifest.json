@@ -1,0 +1,35 @@
+{
+    "timestamp": "20251122-1307",
+    "job_tag": "base_point_2_20251122-1307",
+    "config_path": "/home/canelo/uncertainty_quantification/configs/hpo_base.yaml",
+    "study": {
+        "name": "base_point_2",
+        "storage": "sqlite:///optuna_studies/hpo.db",
+        "direction": "minimize",
+        "resume": true
+    },
+    "budget": {
+        "n_trials": 100
+    },
+    "resources": {
+        "partition": "STUD",
+        "time": "01:00:00",
+        "mem_gb": 32,
+        "cpus_per_task": 2,
+        "gpus": 1,
+        "max_parallel": 4
+    },
+    "io": {
+        "outputs_root": "outputs/optuna",
+        "logs_root": "logs",
+        "job_name_template": "{study}_{ts}",
+        "trial_dir_template": "trial_{trial:05d}"
+    },
+    "base_config": {
+        "train_config_path": "configs/train_base.yaml",
+        "train_script_path": "scripts/train_regression.py"
+    },
+    "notes": "",
+    "hpo_config_sha256": "071ff79e05a4b178107c1241765d03689b26ec27ddfa5747694dc2c56f4d5228",
+    "base_config_sha256": "4f9041fb3b4a2a5791f492731a2b0932e959fa1ae7283c940abe9f0a3ef8dcb8"
+}

@@ -1,1 +1,0 @@
-/home/canelo/uncertainty_quantification/outputs/optuna/prune2_new_ds_base_point_20251120-1706

@@ -1,0 +1,16 @@
+{
+    "training.epochs": 100,
+    "training.lr": 0.00012715929704664944,
+    "training.weight_decay": 1.6472517321777966e-05,
+    "training.grad_clip": 0.0,
+    "model.hidden_dims": [
+        256,
+        256,
+        128
+    ],
+    "model.dropout": 0.1,
+    "model.activation": "tanh",
+    "model.batchnorm": true,
+    "data.batch_size": 1024,
+    "training.point_loss": "huber"
+}

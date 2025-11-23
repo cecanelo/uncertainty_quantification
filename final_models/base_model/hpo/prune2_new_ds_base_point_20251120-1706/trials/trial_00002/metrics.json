@@ -1,8 +1,0 @@
-{
-    "objective_name": "val_mae_orig",
-    "objective": 6970.07275390625,
-    "best_epoch": 100,
-    "val_loss_at_best_epoch": 6979.719047732469,
-    "train_time_sec": 880.039,
-    "train_time_hms": "00:14:40"
-}
