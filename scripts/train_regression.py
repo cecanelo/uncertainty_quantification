@@ -37,7 +37,24 @@ def _point_loss(kind: str, mu, y):
     if kind == "huber": return huber_loss(mu, y, delta=1.0)
     raise ValueError(f"point_loss {kind} not in [mae|mse|huber]")
 
-def _metrics_from_batches(preds, targets, head_type, nll_values=None) -> Dict[str, float]:
+def _metrics_from_batches(
+    preds,
+    targets,
+    head_type,
+    nll_values=None,
+    scales=None,
+) -> Dict[str, float]:
+    """
+    Aggregate basic metrics from batched predictions/targets.
+
+    Notes
+    -----
+    - For `head_type == "point"`, this behaves exactly as before
+      (MAE/RMSE only).
+    - For probabilistic heads ("gauss" / "laplace"), NLL is added if
+      `nll_values` is provided, and optional scale summaries are added
+      if `scales` is provided.
+    """
     mu = np.concatenate(preds, axis=0).reshape(-1)
     yt = np.concatenate(targets, axis=0).reshape(-1)
     ae = np.abs(mu - yt)
@@ -49,7 +66,12 @@ def _metrics_from_batches(preds, targets, head_type, nll_values=None) -> Dict[st
     if head_type in ("gauss", "laplace"):
         if nll_values is not None and len(nll_values):
             out["nll"] = float(np.mean(nll_values))
+        if scales is not None and len(scales):
+            s = np.concatenate(scales, axis=0).reshape(-1)
+            out["scale_mean"] = float(np.mean(s))
+            out["scale_median"] = float(np.median(s))
     return out
+
 
 def _require_keys(d: Dict[str, Any], keys, prefix: str = ""):
     """
@@ -142,6 +164,7 @@ def main():
     best_epoch = -1
     best_state = None
     best_val_loss_at_best_epoch = None
+    best_val_metrics = None  # NEW: keep val metrics at best epoch
 
     print(f"[train] host={socket.gethostname()} device={device} head={head_type} epochs={epochs}")
 
@@ -156,6 +179,7 @@ def main():
         train_losses = []
         train_preds, train_targets = [], []
         train_nll_vals = []
+        train_scales = []  # NEW: per-batch sigma/b for gauss/laplace
 
         for xb, yb in train_loader:
             xb = xb.to(device, non_blocking=True); yb = yb.to(device, non_blocking=True)
@@ -168,12 +192,15 @@ def main():
                 mu, sigma = out["mu"], out["sigma"]
                 loss = gaussian_nll(mu, sigma, yb)
                 train_nll_vals.append(loss.detach().item())
+                train_scales.append(sigma.detach().cpu().numpy())  # NEW
             elif head_type == "laplace":
                 mu, b = out["mu"], out["b"]
                 loss = laplace_nll(mu, b, yb)
                 train_nll_vals.append(loss.detach().item())
+                train_scales.append(b.detach().cpu().numpy())      # NEW
             else:
                 raise ValueError(f"Unsupported head_type={head_type}")
+
 
             loss.backward()
             if grad_clip and grad_clip > 0:
@@ -184,7 +211,14 @@ def main():
             train_preds.append(out["mu"].detach().cpu().numpy())
             train_targets.append(yb.detach().cpu().numpy())
 
-        train_metrics = _metrics_from_batches(train_preds, train_targets, head_type, nll_values=train_nll_vals)
+        train_metrics = _metrics_from_batches(
+            train_preds,
+            train_targets,
+            head_type,
+            nll_values=train_nll_vals,
+            scales=train_scales if train_scales else None,
+        )
+
         train_loss_scalar = np.mean(train_losses).item() if len(train_losses) else 0.0
 
         # ---- validate ----
@@ -192,6 +226,7 @@ def main():
         val_losses = []
         val_preds, val_targets = [], []
         val_nll_vals = []
+        val_scales = []  # NEW: per-batch sigma/b for gauss/laplace
 
         with torch.no_grad():
             for xb, yb in val_loader:
@@ -204,10 +239,13 @@ def main():
                     mu, sigma = out["mu"], out["sigma"]
                     vloss = gaussian_nll(mu, sigma, yb)
                     val_nll_vals.append(vloss.item())
+                    val_scales.append(sigma.detach().cpu().numpy())  # NEW
                 else:
                     mu, b = out["mu"], out["b"]
                     vloss = laplace_nll(mu, b, yb)
                     val_nll_vals.append(vloss.item())
+                    val_scales.append(b.detach().cpu().numpy())      # NEW
+
 
                 val_losses.append(vloss.item())
                 val_preds.append(out["mu"].detach().cpu().numpy())
@@ -215,7 +253,13 @@ def main():
 
         if len(val_preds):
             # Normal case: we have validation batches, compute metrics from them
-            val_metrics = _metrics_from_batches(val_preds, val_targets, head_type, nll_values=val_nll_vals)
+            val_metrics = _metrics_from_batches(
+                val_preds,
+                val_targets,
+                head_type,
+                nll_values=val_nll_vals,
+                scales=val_scales if val_scales else None,  # NEW
+            )
             val_loss_scalar = float(np.mean(val_losses)) if len(val_losses) else float("inf")
         else:
             # Edge case: no validation data (e.g., split_fracs left 0 rows for val).
@@ -224,9 +268,15 @@ def main():
                 "mae": float(train_metrics["mae"]),
                 "rmse": float(train_metrics["rmse"]),
             }
-            if head_type in ("gauss", "laplace") and len(train_nll_vals):
-                # Reuse training NLL values for logging if relevant
-                val_nll_vals = train_nll_vals.copy()
+            if head_type in ("gauss", "laplace"):
+                if len(train_nll_vals):
+                    # Reuse training NLL values for logging if relevant
+                    val_nll_vals = train_nll_vals.copy()
+                # Also mirror scale summaries if available
+                if "scale_mean" in train_metrics:
+                    val_metrics["scale_mean"] = float(train_metrics["scale_mean"])
+                if "scale_median" in train_metrics:
+                    val_metrics["scale_median"] = float(train_metrics["scale_median"])
             # For loss, just reuse the scalar training loss
             val_loss_scalar = float(train_loss_scalar)
 
@@ -301,6 +351,9 @@ def main():
         if improved:
             best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
             best_val_loss_at_best_epoch = val_loss_scalar
+            # NEW: snapshot validation metrics at best epoch (for prob. heads)
+            best_val_metrics = dict(val_metrics)
+
 
         # durations
         ep_dur = round(time.time() - ep_t0, 3)
@@ -330,12 +383,12 @@ def main():
             w.writerow([
                 epoch,
                 "train",
-                f"{train_loss_scalar:.6f}",
-                f"{train_metrics['mae']:.6f}",
-                f"{train_metrics['rmse']:.6f}",
-                f"{train_metrics.get('mae_orig', float('nan')):.6f}",
-                f"{train_metrics.get('rmse_orig', float('nan')):.6f}",
-                f"{np.mean(train_nll_vals) if train_nll_vals else 0.0:.6f}",
+                f"{train_loss_scalar:.4f}",
+                f"{train_metrics['mae']:.4f}",
+                f"{train_metrics['rmse']:.4f}",
+                f"{train_metrics.get('mae_orig', float('nan')):.4f}",
+                f"{train_metrics.get('rmse_orig', float('nan')):.4f}",
+                f"{np.mean(train_nll_vals) if train_nll_vals else 0.0:.4f}",
                 f"{ep_dur:.3f}",
                 ts,
                 "",
@@ -345,26 +398,33 @@ def main():
             w.writerow([
                 epoch,
                 "val",
-                f"{val_loss_scalar:.6f}",
-                f"{val_metrics['mae']:.6f}",
-                f"{val_metrics['rmse']:.6f}",
-                f"{val_metrics.get('mae_orig', float('nan')):.6f}",
-                f"{val_metrics.get('rmse_orig', float('nan')):.6f}",
-                f"{np.mean(val_nll_vals) if val_nll_vals else 0.0:.6f}",
+                f"{val_loss_scalar:.4f}",
+                f"{val_metrics['mae']:.4f}",
+                f"{val_metrics['rmse']:.4f}",
+                f"{val_metrics.get('mae_orig', float('nan')):.4f}",
+                f"{val_metrics.get('rmse_orig', float('nan')):.4f}",
+                f"{np.mean(val_nll_vals) if val_nll_vals else 0.0:.4f}",
                 "",
                 ts,
-                f"{val_loss_scalar:.6f}",
-                f"{objective_val:.6f}",
+                f"{val_loss_scalar:.4f}",
+                f"{objective_val:.4f}",
             ])
 
 
-        print(
-            f"[epoch {epoch}] "
-            f"train_loss={train_loss_scalar:.4f} "
-            f"val_loss={val_loss_scalar:.4f} "
-            f"val_mae_orig={val_metrics.get('mae_orig', float('nan')):.4f} "
-            f"obj({objective_name})={objective_val:.4f}"
+        msg = (
+            f"[epoch {epoch}] \t"
+            f"train_loss={train_loss_scalar:.4f}\t "
+            f"val_loss={val_loss_scalar:.4f}\t "
+            f"val_mae_orig={val_metrics.get('mae_orig', float('nan')):.4f}\t "
+            f"OBJ: {objective_name}={objective_val:.4f}\t"
         )
+        if head_type in ("gauss", "laplace"):
+            msg += (
+                f" mean_scale={val_metrics.get('scale_mean', float('nan')):.4f}\t"
+                f" median_scale={val_metrics.get('scale_median', float('nan')):.4f}"
+            )
+        print(msg)
+
 
         if es_enabled and should_stop:
             print(
@@ -426,9 +486,21 @@ def main():
         "train_time_sec": total_train_sec_rounded,
         "train_time_hms": train_time_hms,
     }
+
+    # For probabilistic heads, also expose validation-scale summaries at the best epoch
+    if head_type in ("gauss", "laplace") and best_val_metrics is not None:
+        if "scale_mean" in best_val_metrics:
+            metrics_payload["val_scale_mean_at_best"] = float(best_val_metrics["scale_mean"])
+        if "scale_median" in best_val_metrics:
+            metrics_payload["val_scale_median_at_best"] = float(best_val_metrics["scale_median"])
+        # NEW: include MAE/RMSE in target space at best epoch
+        if "mae_orig" in best_val_metrics:
+            metrics_payload["val_mae_orig_at_best"] = float(best_val_metrics["mae_orig"])
+        if "rmse_orig" in best_val_metrics:
+            metrics_payload["val_rmse_orig_at_best"] = float(best_val_metrics["rmse_orig"])
+
     with open(Path(args.outdir) / "metrics.json", "w") as f:
         json.dump(metrics_payload, f, indent=4)
-
 
 
     if eval_after_train:
@@ -452,6 +524,7 @@ def main():
             split_losses = []
             split_preds, split_targets = [], []
             split_nll_vals = []
+            split_scales = []  # NEW: per-batch sigma/b for this split
 
             with torch.no_grad():
                 for xb, yb in loader:
@@ -459,30 +532,40 @@ def main():
                     yb = yb.to(device, non_blocking=True)
                     out = model(xb)
 
-                    if head_type == "point":
-                        mu = out["mu"]
-                        tloss = _point_loss(cfg["training"].get("point_loss", "huber"), mu, yb)
-                    elif head_type == "gauss":
-                        mu, sigma = out["mu"], out["sigma"]
-                        tloss = gaussian_nll(mu, sigma, yb)
-                    elif head_type == "laplace":
-                        mu, b = out["mu"], out["b"]
-                        tloss = laplace_nll(mu, b, yb)
-                    else:
-                        raise ValueError(f"Unknown head_type {head_type}")
+                if head_type == "point":
+                    mu = out["mu"]
+                    tloss = _point_loss(cfg["training"].get("point_loss", "huber"), mu, yb)
+                elif head_type == "gauss":
+                    mu, sigma = out["mu"], out["sigma"]
+                    tloss = gaussian_nll(mu, sigma, yb)
+                    split_scales.append(sigma.detach().cpu().numpy())  # NEW
+                elif head_type == "laplace":
+                    mu, b = out["mu"], out["b"]
+                    tloss = laplace_nll(mu, b, yb)
+                    split_scales.append(b.detach().cpu().numpy())      # NEW
+                else:
+                    raise ValueError(f"Unknown head_type {head_type}")
 
-                    split_losses.append(tloss.detach().cpu().numpy())
-                    split_preds.append(mu.detach().cpu().numpy())
-                    split_targets.append(yb.detach().cpu().numpy())
-                    if head_type in ("gauss", "laplace"):
-                        split_nll_vals.append(tloss.detach().cpu().numpy())
+                split_losses.append(tloss.detach().cpu().numpy())
+                split_preds.append(mu.detach().cpu().numpy())
+                split_targets.append(yb.detach().cpu().numpy())
+                if head_type in ("gauss", "laplace"):
+                    split_nll_vals.append(tloss.detach().cpu().numpy())
 
             if not split_preds:
                 # No data for this split – nothing to save
                 continue
 
             # Metrics on transformed target scale (not strictly needed just to save preds)
-            split_metrics = _metrics_from_batches(split_preds, split_targets, head_type, nll_values=split_nll_vals)
+            # Metrics on transformed target scale (not strictly needed just to save preds)
+            split_metrics = _metrics_from_batches(
+                split_preds,
+                split_targets,
+                head_type,
+                nll_values=split_nll_vals,
+                scales=split_scales if split_scales else None,  # NEW
+            )
+
             split_loss_scalar = float(np.mean(split_losses)) if len(split_losses) else float("inf")
             split_metrics["loss"] = split_loss_scalar
 
@@ -493,6 +576,9 @@ def main():
             target_meta = preproc_meta.get("target", {})
             mu_o = inverse_target(mu_t, target_meta).reshape(-1)
             yt_o = inverse_target(yt_t, target_meta).reshape(-1)
+            split_scales_all = None
+            if head_type in ("gauss", "laplace") and split_scales:
+                split_scales_all = np.concatenate(split_scales, axis=0).reshape(-1)
 
             # Align with original IDs or row indices for this split
             splits = preproc_meta.get("splits", {})
@@ -503,19 +589,29 @@ def main():
             if id_col is not None and ids_all is not None:
                 ids_all = np.array(ids_all)
                 ids_split = ids_all[split_idx]
-                header = [id_col, "y_true", "y_pred"]
                 first_col = ids_split
+                id_header = id_col
             else:
-                header = ["row_index", "y_true", "y_pred"]
                 first_col = split_idx
+                id_header = "row_index"
+
+            if split_scales_all is not None:
+                header = [id_header, "y_true", "y_pred", "y_scale"]
+            else:
+                header = [id_header, "y_true", "y_pred"]
 
             # Save per-instance predictions (original target scale)
             out_path = eval_dir / csv_name
             with open(out_path, "w", newline="") as f:
                 writer = csv.writer(f)
                 writer.writerow(header)
-                for key, yt_i, mu_i in zip(first_col, yt_o, mu_o):
-                    writer.writerow([key, float(yt_i), float(mu_i)])
+                if split_scales_all is not None:
+                    for key, yt_i, mu_i, s_i in zip(first_col, yt_o, mu_o, split_scales_all):
+                        writer.writerow([key, float(yt_i), float(mu_i), float(s_i)])
+                else:
+                    for key, yt_i, mu_i in zip(first_col, yt_o, mu_o):
+                        writer.writerow([key, float(yt_i), float(mu_i)])
+
 
             print(f"[eval-after-train] Saved {split_name} predictions to: {out_path}")
 
@@ -523,6 +619,8 @@ def main():
         te_losses = []
         te_preds, te_targets = [], []
         te_nll_vals = []
+        te_scales = []  # NEW: per-batch sigma/b for test split
+
 
         with torch.no_grad():
             for xb, yb in test_loader:
@@ -536,11 +634,14 @@ def main():
                 elif head_type == "gauss":
                     mu, sigma = out["mu"], out["sigma"]
                     tloss = gaussian_nll(mu, sigma, yb)
+                    te_scales.append(sigma.detach().cpu().numpy())  # NEW
                 elif head_type == "laplace":
                     mu, b = out["mu"], out["b"]
                     tloss = laplace_nll(mu, b, yb)
+                    te_scales.append(b.detach().cpu().numpy())      # NEW
                 else:
                     raise ValueError(f"Unknown head_type {head_type}")
+
 
                 te_losses.append(tloss.detach().cpu().numpy())
                 te_preds.append(mu.detach().cpu().numpy())
@@ -549,7 +650,15 @@ def main():
                     te_nll_vals.append(tloss.detach().cpu().numpy())
 
         # Metrics on transformed target scale
-        test_metrics = _metrics_from_batches(te_preds, te_targets, head_type, nll_values=te_nll_vals)
+        # Metrics on transformed target scale
+        test_metrics = _metrics_from_batches(
+            te_preds,
+            te_targets,
+            head_type,
+            nll_values=te_nll_vals,
+            scales=te_scales if te_scales else None,  # NEW
+        )
+
         test_loss_scalar = float(np.mean(te_losses)) if len(te_losses) else float("inf")
         test_metrics["loss"] = test_loss_scalar
 
@@ -561,6 +670,12 @@ def main():
         target_meta = preproc_meta.get("target", {})
         mu_o = inverse_target(mu_t, target_meta).reshape(-1)
         yt_o = inverse_target(yt_t, target_meta).reshape(-1)
+
+        # NEW: flatten per-instance scales (still in target-transform space)
+        te_scales_all = None
+        if head_type in ("gauss", "laplace") and te_scales:
+            te_scales_all = np.concatenate(te_scales, axis=0).reshape(-1)
+
 
         ae_o = np.abs(mu_o - yt_o)
         se_o = (mu_o - yt_o) ** 2
@@ -586,19 +701,29 @@ def main():
         if id_col is not None and ids_all is not None:
             ids_all = np.array(ids_all)
             ids_test = ids_all[test_idx]
-            header = [id_col, "y_true", "y_pred"]
             first_col = ids_test
+            id_header = id_col
         else:
             # Fallback: use row_index if no explicit ID column
-            header = ["row_index", "y_true", "y_pred"]
             first_col = test_idx
+            id_header = "row_index"
+
+        if te_scales_all is not None:
+            header = [id_header, "y_true", "y_pred", "y_scale"]
+        else:
+            header = [id_header, "y_true", "y_pred"]
 
         # Save per-instance predictions (original target scale) with ID/row_index
         with open(eval_dir / "test_preds.csv", "w", newline="") as f:
             writer = csv.writer(f)
             writer.writerow(header)
-            for key, yt_i, mu_i in zip(first_col, yt_o, mu_o):
-                writer.writerow([key, float(yt_i), float(mu_i)])
+            if te_scales_all is not None:
+                for key, yt_i, mu_i, s_i in zip(first_col, yt_o, mu_o, te_scales_all):
+                    writer.writerow([key, float(yt_i), float(mu_i), float(s_i)])
+            else:
+                for key, yt_i, mu_i in zip(first_col, yt_o, mu_o):
+                    writer.writerow([key, float(yt_i), float(mu_i)])
+
 
         print(f"[eval-after-train] Saved test predictions to: {eval_dir / 'test_preds.csv'}")
 

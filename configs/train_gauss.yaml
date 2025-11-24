@@ -2,7 +2,7 @@ seed: 1
 
 slurm:
     partition: "STUD"
-    time: "01:00:00"
+    time: "00:30:00"
     mem_gb: 32
     cpus: 4
     gpus: 1

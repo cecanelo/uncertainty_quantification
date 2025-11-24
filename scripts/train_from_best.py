@@ -64,8 +64,8 @@ def main() -> None:
     parser.add_argument(
         "--partition",
         type=str,
-        default="STUD",
-        help="SLURM partition for --mode slurm (e.g. STUD or TEST).",
+        default=None,
+        help="SLURM partition for --mode slurm (overrides config when set; otherwise uses config or STUD).",
     )
     parser.add_argument(
         "--time",
@@ -183,7 +183,9 @@ def main() -> None:
 
     # --- SLURM resources: allow config defaults, overridden by CLI ---
     slurm_cfg = cfg.get("slurm", {}) or {}
-    partition = slurm_cfg.get("partition", args.partition)
+    # If the CLI partition is provided, let it override the merged config.
+    # Otherwise fall back to config, then a safe default.
+    partition = args.partition if args.partition is not None else slurm_cfg.get("partition", "STUD")
     time_str  = slurm_cfg.get("time", args.time)
     mem_gb    = int(slurm_cfg.get("mem_gb", args.mem_gb))
     cpus      = int(slurm_cfg.get("cpus", args.cpus))
@@ -214,10 +216,11 @@ def main() -> None:
 
     # Final training_outdir: root (from best_hparams) + run_tag
     training_outdir = (training_root / run_tag).resolve()
+    final_outdir = f"{training_outdir}_${{SLURM_JOB_ID}}"
 
     # --- IO section: make sure training_outdir and evals_root are set consistently ---
     io_section = cfg.get("io", {}) or {}
-    io_section["training_outdir"] = str(training_outdir)
+    io_section["training_outdir"] = str(final_outdir)
     io_section.setdefault("evals_root", "outputs/evals")
     cfg["io"] = io_section
 
@@ -237,19 +240,18 @@ def main() -> None:
     derived_cfg_path.write_text(yaml.safe_dump(cfg, sort_keys=False))
 
     # --- Launch training ---
-    training_outdir.mkdir(parents=True, exist_ok=True)
     cmd = [
         sys.executable,
         "scripts/train_regression.py",
         "--config",
         str(derived_cfg_path),
         "--outdir",
-        str(training_outdir),
+        str(final_outdir),
     ]
 
     print(f"[train_from_best] Using best config from: {cfg_path}")
-    print(f"[train_from_best] Training outdir: {training_outdir}")
-    print(f"[train_from_best] Evals will be under: {cfg['io']['evals_root']}/{training_outdir.name}")
+    print(f"[train_from_best] Training outdir: {final_outdir}")
+    print(f"[train_from_best] Evals will be under: {cfg['io']['evals_root']}/{Path(final_outdir).name}")
 
     if args.mode == "local":
         # Run directly on the login node / current shell
@@ -284,24 +286,34 @@ source "$HOME/miniconda3/etc/profile.d/conda.sh"
 conda activate {conda_env}
 
 echo "[env] host=$(hostname) date=$(date)"
-echo "[env] RUN_DIR={training_outdir}_${{SLURM_JOB_ID}}"
-
-{sys.executable} scripts/train_regression.py --config "{derived_cfg_path}" --outdir "{training_outdir}_${{SLURM_JOB_ID}}"
-
+OUTDIR="{final_outdir}"
+echo "[env] RUN_DIR=$OUTDIR"
+{sys.executable} scripts/train_regression.py --config "{derived_cfg_path}" --outdir "$OUTDIR"
 """
+
         print("[train_from_best] Submitting sbatch with script:")
         print(sbatch_script)
 
         if args.dry_run:
             print("[train_from_best] --dry-run set; not submitting.")
         else:
-            proc = subprocess.run(
-                ["sbatch"],
-                input=sbatch_script.encode("utf-8"),
-                check=True,
-                capture_output=True,
-            )
-            print(proc.stdout.decode("utf-8").strip())
+            try:
+                proc = subprocess.run(
+                    ["sbatch"],
+                    input=sbatch_script.encode("utf-8"),
+                    check=True,
+                    capture_output=True,
+                )
+                print(proc.stdout.decode("utf-8").strip())
+            except subprocess.CalledProcessError as e:
+                # Surface sbatch stdout/stderr to help diagnose submission failures
+                out = e.stdout.decode("utf-8", errors="ignore") if e.stdout else ""
+                err = e.stderr.decode("utf-8", errors="ignore") if e.stderr else ""
+                if out.strip():
+                    print(out.strip())
+                if err.strip():
+                    print(err.strip(), file=sys.stderr)
+                raise
 
 
 

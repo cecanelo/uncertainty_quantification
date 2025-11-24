@@ -105,7 +105,8 @@ def main():
 
     # --- 6) Run inference on the split ---
     preds, targets = [], []
-    nll_vals = []
+    nll_vals: List[float] = []
+    scales = []  # NEW: per-instance sigma/b for probabilistic heads
     with torch.no_grad():
         xb = X_split.to(device)
         yb = y_split.to(device)
@@ -119,13 +120,26 @@ def main():
             sigma = out["sigma"]
             nll = gaussian_nll(mu, sigma, yb)
             nll_vals.append(float(nll.item()))
+            scales.append(sigma.detach().cpu().numpy())  # NEW
         elif head_type == "laplace":
             b = out["b"]
             nll = laplace_nll(mu, b, yb)
             nll_vals.append(float(nll.item()))
+            scales.append(b.detach().cpu().numpy())      # NEW
+
 
     # --- 7) Compute metrics using the same helper as train_regression (transformed scale) ---
-    metrics = _metrics_from_batches(preds, targets, head_type, nll_values=nll_vals)
+    metrics = _metrics_from_batches(
+        preds,
+        targets,
+        head_type,
+        nll_values=nll_vals,
+        scales=scales if scales else None,  # NEW
+    )
+
+    scale_concat = None
+    if head_type in ("gauss", "laplace") and scales:
+        scale_concat = np.concatenate(scales, axis=0).reshape(-1)
 
     # --- 8) Basic consistency checks ---
     mu_concat = np.concatenate(preds, axis=0).reshape(-1)
@@ -156,6 +170,12 @@ def main():
     print(f"[eval] MAE_orig={mae_orig:.2f}  RMSE_orig={rmse_orig:.2f}")
     if "nll" in metrics:
         print(f"[eval] NLL={metrics['nll']:.6f}")
+    if "scale_mean" in metrics:
+        print(
+            f"[eval] mean_scale={metrics['scale_mean']:.6f} "
+            f"median_scale={metrics['scale_median']:.6f}"
+        )
+
 
     out_json = {
         "split": args.split,
@@ -168,6 +188,10 @@ def main():
     }
     if "nll" in metrics:
         out_json["nll"] = float(metrics["nll"])
+    if "scale_mean" in metrics:
+        out_json["scale_mean"] = float(metrics["scale_mean"])
+        out_json["scale_median"] = float(metrics["scale_median"])
+
 
     with (outdir / f"eval_metrics_{args.split}.json").open("w") as f:
         json.dump(out_json, f, indent=4)
@@ -199,11 +223,22 @@ def main():
     else:
         preds_path = eval_dir / f"preds_{args.split}.csv"
 
+    # Header depends on whether we have scales (gauss/laplace) or not (point)
+    if scale_concat is not None:
+        header = [id_col, "y_true", "y_pred", "y_scale"]
+    else:
+        header = [id_col, "y_true", "y_pred"]
+
     with preds_path.open("w", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow([id_col, "y_true", "y_pred"])
-        for key, yt_o_i, mu_o_i in zip(ids_split, yt_orig, mu_orig):
-            writer.writerow([key, float(yt_o_i), float(mu_o_i)])
+        writer.writerow(header)
+        if scale_concat is not None:
+            for key, yt_o_i, mu_o_i, s_i in zip(ids_split, yt_orig, mu_orig, scale_concat):
+                writer.writerow([key, float(yt_o_i), float(mu_o_i), float(s_i)])
+        else:
+            for key, yt_o_i, mu_o_i in zip(ids_split, yt_orig, mu_orig):
+                writer.writerow([key, float(yt_o_i), float(mu_o_i)])
+
 
     print(f"[eval] Saved predictions to: {preds_path}")
 

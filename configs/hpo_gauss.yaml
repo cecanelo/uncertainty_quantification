@@ -1,17 +1,17 @@
 study:
-    name: "gaussian"
+    name: "gauss"
     storage: "sqlite:///optuna_studies/hpo.db"
     direction: "minimize"
     resume: true
 
 budget:
-    n_trials: 50                # small run now; increase to 20–50 for full HPO
+    n_trials: 100                # small run now; increase to 20–50 for full HPO
 
 resources:
     partition: "STUD"          # STUD has GPUs
-    time: "00:30:00"           # increase for larger HPO runs
+    time: "03:00:00"           # increase for larger HPO runs
     mem_gb: 32                 # STUD default per GPU
-    cpus_per_task: 2           # STUD default per GPU
+    cpus_per_task: 4           # STUD default per GPU
     gpus: 1                    # STUD supports 2070 GPUs
     max_parallel: 4            # how many trials to run at once
 

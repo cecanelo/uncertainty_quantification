@@ -5,3 +5,10 @@ __pycache__/
 .ipynb_checkpoints/
 logs/
 outputs/
+final_models/
+outputs/
+optuna_studies/
+logs/
+datasets/
+__pycache__/
+.venv/
