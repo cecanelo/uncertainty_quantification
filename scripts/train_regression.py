@@ -11,7 +11,7 @@ import torch.optim as optim
 import torch.nn as nn
 import yaml
 
-from data import get_dataloaders, inverse_target
+from data import get_dataloaders, inverse_target, _prepare_frame, _apply_encoders, DataConfig, _target_transform
 from model_base import MLPRegressor, mse_loss, mae_loss, huber_loss, gaussian_nll, laplace_nll
 
 def set_seed(seed: int):
@@ -83,6 +83,24 @@ def _require_keys(d: Dict[str, Any], keys, prefix: str = ""):
         raise ValueError(f"Missing required config key(s): {', '.join(pref + k for k in missing)}")
 
 
+def _delta_sigma_orig(head_type: str,
+                      sigma_z: np.ndarray | None,
+                      mu_orig: np.ndarray,
+                      target_meta: Dict[str, str]) -> np.ndarray:
+    """
+    Map transformed-space scale to an approximate original-space std via the delta method.
+    For laplace, sigma_z should already be std-like (sqrt(2)*b_z).
+    """
+    n = mu_orig.shape[0]
+    if sigma_z is None or head_type == "point":
+        return np.full(n, np.nan, dtype=float)
+    sigma_z = sigma_z.reshape(-1)
+    mode = (target_meta or {}).get("mode", "none").lower()
+    if mode == "log1p":
+        return (mu_orig + 1.0) * sigma_z
+    return sigma_z
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--config", required=True)
@@ -127,7 +145,7 @@ def main():
         head_type=head_type,
         activation=cfg["model"].get("activation", "relu"),
         dropout=float(cfg["model"].get("dropout", 0.1)),
-        use_batchnorm=bool(cfg["model"].get("batchnorm", True)),
+        use_batchnorm=False,  # batch norm disabled for all runs
     ).to(device)
 
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -512,108 +530,105 @@ def main():
         eval_dir.mkdir(parents=True, exist_ok=True)
 
         # ---- Save TRAIN and VAL predictions (original target scale) ----
-        model.eval()
+        # If MC eval is enabled, skip writing separate deterministic CSVs to avoid duplication.
+        mc_cfg = train_cfg.get("mc_eval", {}) or {}
+        do_mc = mc_cfg.get("enabled", False)
+        if not do_mc:
+            model.eval()
+            for split_name, loader, split_key, csv_name in [
+                ("train", train_loader, "train", "train_preds.csv"),
+                ("val",   val_loader,   "val",   "val_preds.csv"),
+            ]:
+                if loader is None:
+                    continue  # defensive: if a split is missing, skip
 
-        for split_name, loader, split_key, csv_name in [
-            ("train", train_loader, "train", "train_preds.csv"),
-            ("val",   val_loader,   "val",   "val_preds.csv"),
-        ]:
-            if loader is None:
-                continue  # defensive: if a split is missing, skip
+                split_losses = []
+                split_preds, split_targets = [], []
+                split_nll_vals = []
+                split_scales = []  # NEW: per-batch sigma/b for this split
 
-            split_losses = []
-            split_preds, split_targets = [], []
-            split_nll_vals = []
-            split_scales = []  # NEW: per-batch sigma/b for this split
+                with torch.no_grad():
+                    for xb, yb in loader:
+                        xb = xb.to(device, non_blocking=True)
+                        yb = yb.to(device, non_blocking=True)
+                        out = model(xb)
 
-            with torch.no_grad():
-                for xb, yb in loader:
-                    xb = xb.to(device, non_blocking=True)
-                    yb = yb.to(device, non_blocking=True)
-                    out = model(xb)
+                    if head_type == "point":
+                        mu = out["mu"]
+                        tloss = _point_loss(cfg["training"].get("point_loss", "huber"), mu, yb)
+                    elif head_type == "gauss":
+                        mu, sigma = out["mu"], out["sigma"]
+                        tloss = gaussian_nll(mu, sigma, yb)
+                        split_scales.append(sigma.detach().cpu().numpy())  # NEW
+                    elif head_type == "laplace":
+                        mu, b = out["mu"], out["b"]
+                        tloss = laplace_nll(mu, b, yb)
+                        split_scales.append(b.detach().cpu().numpy())      # NEW
+                    else:
+                        raise ValueError(f"Unknown head_type {head_type}")
 
-                if head_type == "point":
-                    mu = out["mu"]
-                    tloss = _point_loss(cfg["training"].get("point_loss", "huber"), mu, yb)
-                elif head_type == "gauss":
-                    mu, sigma = out["mu"], out["sigma"]
-                    tloss = gaussian_nll(mu, sigma, yb)
-                    split_scales.append(sigma.detach().cpu().numpy())  # NEW
-                elif head_type == "laplace":
-                    mu, b = out["mu"], out["b"]
-                    tloss = laplace_nll(mu, b, yb)
-                    split_scales.append(b.detach().cpu().numpy())      # NEW
+                    split_losses.append(tloss.detach().cpu().numpy())
+                    split_preds.append(mu.detach().cpu().numpy())
+                    split_targets.append(yb.detach().cpu().numpy())
+                    if head_type in ("gauss", "laplace"):
+                        split_nll_vals.append(tloss.detach().cpu().numpy())
+
+                if not split_preds:
+                    # No data for this split – nothing to save
+                    continue
+
+                split_metrics = _metrics_from_batches(
+                    split_preds,
+                    split_targets,
+                    head_type,
+                    nll_values=split_nll_vals,
+                    scales=split_scales if split_scales else None,  # NEW
+                )
+
+                split_loss_scalar = float(np.mean(split_losses)) if len(split_losses) else float("inf")
+                split_metrics["loss"] = split_loss_scalar
+
+                mu_t = np.concatenate(split_preds, axis=0).reshape(-1, 1)
+                yt_t = np.concatenate(split_targets, axis=0).reshape(-1, 1)
+
+                target_meta = preproc_meta.get("target", {})
+                mu_o = inverse_target(mu_t, target_meta).reshape(-1)
+                yt_o = inverse_target(yt_t, target_meta).reshape(-1)
+                split_scales_all = None
+                if head_type in ("gauss", "laplace") and split_scales:
+                    split_scales_all = np.concatenate(split_scales, axis=0).reshape(-1)
+
+                splits = preproc_meta.get("splits", {})
+                split_idx = np.array(splits.get(split_key, []), dtype=int)
+
+                id_col = preproc_meta.get("id_col")
+                ids_all = preproc_meta.get("id_values")
+                if id_col is not None and ids_all is not None:
+                    ids_all = np.array(ids_all)
+                    ids_split = ids_all[split_idx]
+                    first_col = ids_split
+                    id_header = id_col
                 else:
-                    raise ValueError(f"Unknown head_type {head_type}")
+                    first_col = split_idx
+                    id_header = "row_index"
 
-                split_losses.append(tloss.detach().cpu().numpy())
-                split_preds.append(mu.detach().cpu().numpy())
-                split_targets.append(yb.detach().cpu().numpy())
-                if head_type in ("gauss", "laplace"):
-                    split_nll_vals.append(tloss.detach().cpu().numpy())
-
-            if not split_preds:
-                # No data for this split – nothing to save
-                continue
-
-            # Metrics on transformed target scale (not strictly needed just to save preds)
-            # Metrics on transformed target scale (not strictly needed just to save preds)
-            split_metrics = _metrics_from_batches(
-                split_preds,
-                split_targets,
-                head_type,
-                nll_values=split_nll_vals,
-                scales=split_scales if split_scales else None,  # NEW
-            )
-
-            split_loss_scalar = float(np.mean(split_losses)) if len(split_losses) else float("inf")
-            split_metrics["loss"] = split_loss_scalar
-
-            # Metrics on original target scale
-            mu_t = np.concatenate(split_preds, axis=0).reshape(-1, 1)
-            yt_t = np.concatenate(split_targets, axis=0).reshape(-1, 1)
-
-            target_meta = preproc_meta.get("target", {})
-            mu_o = inverse_target(mu_t, target_meta).reshape(-1)
-            yt_o = inverse_target(yt_t, target_meta).reshape(-1)
-            split_scales_all = None
-            if head_type in ("gauss", "laplace") and split_scales:
-                split_scales_all = np.concatenate(split_scales, axis=0).reshape(-1)
-
-            # Align with original IDs or row indices for this split
-            splits = preproc_meta.get("splits", {})
-            split_idx = np.array(splits.get(split_key, []), dtype=int)
-
-            id_col = preproc_meta.get("id_col")
-            ids_all = preproc_meta.get("id_values")
-            if id_col is not None and ids_all is not None:
-                ids_all = np.array(ids_all)
-                ids_split = ids_all[split_idx]
-                first_col = ids_split
-                id_header = id_col
-            else:
-                first_col = split_idx
-                id_header = "row_index"
-
-            if split_scales_all is not None:
-                header = [id_header, "y_true", "y_pred", "y_scale"]
-            else:
-                header = [id_header, "y_true", "y_pred"]
-
-            # Save per-instance predictions (original target scale)
-            out_path = eval_dir / csv_name
-            with open(out_path, "w", newline="") as f:
-                writer = csv.writer(f)
-                writer.writerow(header)
                 if split_scales_all is not None:
-                    for key, yt_i, mu_i, s_i in zip(first_col, yt_o, mu_o, split_scales_all):
-                        writer.writerow([key, float(yt_i), float(mu_i), float(s_i)])
+                    header = [id_header, "y_true", "y_pred", "y_scale"]
                 else:
-                    for key, yt_i, mu_i in zip(first_col, yt_o, mu_o):
-                        writer.writerow([key, float(yt_i), float(mu_i)])
+                    header = [id_header, "y_true", "y_pred"]
 
+                out_path = eval_dir / csv_name
+                with open(out_path, "w", newline="") as f:
+                    writer = csv.writer(f)
+                    writer.writerow(header)
+                    if split_scales_all is not None:
+                        for key, yt_i, mu_i, s_i in zip(first_col, yt_o, mu_o, split_scales_all):
+                            writer.writerow([key, float(yt_i), float(mu_i), float(s_i)])
+                    else:
+                        for key, yt_i, mu_i in zip(first_col, yt_o, mu_o):
+                            writer.writerow([key, float(yt_i), float(mu_i)])
 
-            print(f"[eval-after-train] Saved {split_name} predictions to: {out_path}")
+                print(f"[eval-after-train] Saved {split_name} predictions to: {out_path}")
 
 
         te_losses = []
@@ -714,18 +729,153 @@ def main():
             header = [id_header, "y_true", "y_pred"]
 
         # Save per-instance predictions (original target scale) with ID/row_index
-        with open(eval_dir / "test_preds.csv", "w", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow(header)
-            if te_scales_all is not None:
-                for key, yt_i, mu_i, s_i in zip(first_col, yt_o, mu_o, te_scales_all):
-                    writer.writerow([key, float(yt_i), float(mu_i), float(s_i)])
-            else:
-                for key, yt_i, mu_i in zip(first_col, yt_o, mu_o):
-                    writer.writerow([key, float(yt_i), float(mu_i)])
+        # If MC eval is enabled, skip the deterministic test CSV to avoid duplication
+        if not do_mc:
+            with open(eval_dir / "test_preds.csv", "w", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(header)
+                if te_scales_all is not None:
+                    for key, yt_i, mu_i, s_i in zip(first_col, yt_o, mu_o, te_scales_all):
+                        writer.writerow([key, float(yt_i), float(mu_i), float(s_i)])
+                else:
+                    for key, yt_i, mu_i in zip(first_col, yt_o, mu_o):
+                        writer.writerow([key, float(yt_i), float(mu_i)])
 
+            print(f"[eval-after-train] Saved test predictions to: {eval_dir / 'test_preds.csv'}")
 
-        print(f"[eval-after-train] Saved test predictions to: {eval_dir / 'test_preds.csv'}")
+        # Optional MC-dropout evaluation immediately after training
+        mc_cfg = train_cfg.get("mc_eval", {}) or {}
+        if mc_cfg.get("enabled", False):
+            n_samples = int(mc_cfg.get("n_samples", 20))
+            mc_batch_size = int(mc_cfg.get("batch_size", cfg["data"].get("batch_size", 512)))
+            include_samples = bool(mc_cfg.get("include_samples", False))
+            p_drop_override = mc_cfg.get("p_drop")
+
+            # Rebuild features deterministically using stored encoders so row order matches splits
+            dc = DataConfig(**cfg["data"])
+            df_full = _prepare_frame(dc)
+            y_full = df_full[dc.target_col].astype(float).to_numpy()
+            y_tr_full, y_meta_full = _target_transform(y_full, dc.target_transform)
+
+            enc = preproc_meta["encoders"]
+            numeric_cols = preproc_meta.get("numeric_cols", [])
+            onehot_cols = preproc_meta.get("onehot_cols", [])
+            hash_cols = preproc_meta.get("hash_cols", [])
+            X_full = _apply_encoders(df_full, numeric_cols, onehot_cols, hash_cols, enc)
+            splits_meta = preproc_meta.get("splits", {})
+
+            def _build_loader(split_idx: np.ndarray):
+                Xs = torch.tensor(X_full[split_idx], dtype=torch.float32)
+                ys_ = torch.tensor(y_tr_full[split_idx], dtype=torch.float32)
+                return torch.utils.data.DataLoader(
+                    torch.utils.data.TensorDataset(Xs, ys_),
+                    batch_size=mc_batch_size,
+                    shuffle=False,
+                    num_workers=0,
+                    pin_memory=False,
+                    drop_last=False,
+                )
+
+            def _det_pass(loader):
+                model.eval()
+                preds_z = []
+                scales_z = []
+                with torch.no_grad():
+                    for xb, _ in loader:
+                        xb = xb.to(device, non_blocking=True)
+                        out = model(xb)
+                        preds_z.append(out["mu"].detach().cpu().numpy())
+                        if head_type == "gauss":
+                            scales_z.append(out["sigma"].detach().cpu().numpy())
+                        elif head_type == "laplace":
+                            scales_z.append((np.sqrt(2.0) * out["b"]).detach().cpu().numpy())
+                mu_z = np.concatenate(preds_z, axis=0).reshape(-1)
+                sigma_z = np.concatenate(scales_z, axis=0).reshape(-1) if scales_z else None
+                return mu_z, sigma_z
+
+            def _mc_pass(loader):
+                preds = []
+                model.train()
+                with torch.no_grad():
+                    for _ in range(n_samples):
+                        batch_preds = []
+                        for xb, _ in loader:
+                            xb = xb.to(device, non_blocking=True)
+                            out = model(xb)
+                            batch_preds.append(out["mu"].detach().cpu().numpy())
+                        preds.append(np.concatenate(batch_preds, axis=0).reshape(-1))
+                return np.stack(preds, axis=0)
+
+            # Override dropout p for MC inference if requested
+            if p_drop_override is not None:
+                for m in model.modules():
+                    if isinstance(m, torch.nn.Dropout):
+                        m.p = float(p_drop_override)
+
+            for split_key, fname in [("train", "mc_preds_train.csv"), ("val", "mc_preds_val.csv"), ("test", "mc_preds_test.csv")]:
+                if split_key not in splits_meta:
+                    continue
+                split_idx = np.array(splits_meta[split_key], dtype=int)
+                if split_idx.size == 0:
+                    continue
+
+                loader_mc = _build_loader(split_idx)
+                mu_det_z, sigma_det_z = _det_pass(loader_mc)
+                mc_samples_z = _mc_pass(loader_mc)
+
+                y_true_z = y_tr_full[split_idx].reshape(-1)
+                y_true_orig = inverse_target(y_true_z.reshape(-1, 1), y_meta_full).reshape(-1)
+                mu_det_orig = inverse_target(mu_det_z.reshape(-1, 1), y_meta_full).reshape(-1)
+                mc_samples_orig = inverse_target(mc_samples_z, y_meta_full)
+                means_orig = mc_samples_orig.mean(axis=0)
+                stds_orig = mc_samples_orig.std(axis=0)
+                sigma_ale_orig = _delta_sigma_orig(head_type, sigma_det_z, mu_det_orig, y_meta_full)
+
+                # Resolve IDs
+                if "id_values" in preproc_meta and preproc_meta.get("id_col"):
+                    ids_split = np.array(preproc_meta["id_values"])[split_idx]
+                elif "id" in df_full.columns:
+                    ids_split = df_full["id"].to_numpy()[split_idx]
+                else:
+                    ids_split = split_idx
+
+                header = [
+                    "id",
+                    "split",
+                    "head_type",
+                    "mc_flag",
+                    "n_mc",
+                    "y_true",
+                    "y_pred_det",
+                    "y_pred_mc_mean",
+                    "sigma_ale_raw",
+                    "sigma_epi_raw",
+                ]
+                if include_samples:
+                    header.extend([f"y_pred_mc_{i}" for i in range(1, n_samples + 1)])
+
+                out_path = eval_dir / fname
+                with out_path.open("w", newline="") as f:
+                    writer = csv.writer(f)
+                    writer.writerow(header)
+                    for j, mid in enumerate(ids_split):
+                        row = [
+                            mid,
+                            split_key,
+                            head_type,
+                            1,
+                            n_samples,
+                            float(y_true_orig[j]),
+                            float(mu_det_orig[j]),
+                            float(means_orig[j]),
+                            float(sigma_ale_orig[j]) if np.isfinite(sigma_ale_orig[j]) else np.nan,
+                            float(stds_orig[j]) if np.isfinite(stds_orig[j]) else np.nan,
+                        ]
+                        if include_samples:
+                            row.extend([float(v) for v in mc_samples_orig[:, j]])
+                        writer.writerow(row)
+
+                print(f"[eval-after-train][mc] Saved MC preds to: {out_path}")
 
 
 if __name__ == "__main__":

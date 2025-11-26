@@ -21,7 +21,7 @@ model:
     dido_hidden_dims: [512, 256]
     activation: "relu"
     dropout: 0.10
-    batchnorm: true
+    batchnorm: false
 
 training:
     device: "cuda"

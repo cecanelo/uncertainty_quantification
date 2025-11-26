@@ -261,6 +261,18 @@ def main() -> None:
 
         # 3) Persist trial artifacts
         save_json(sampled_params, str(trial_dir / "trial_overrides.json"))
+        # Overlay HPO resource settings into the train config for accurate provenance.
+        resources_cfg = cfg.get("resources", {}) or {}
+        merged["slurm"] = {
+            "partition": resources_cfg.get("partition", "STUD"),
+            "time": resources_cfg.get("time", "01:00:00"),
+            "mem_gb": int(resources_cfg.get("mem_gb", 32)),
+            "cpus": int(resources_cfg.get("cpus_per_task", 4)),
+            "gpus": int(resources_cfg.get("gpus", 0)),
+            "job_name": resources_cfg.get("job_name", study_cfg.get("name", "hpo_trial")),
+            "conda_env": resources_cfg.get("conda_env", "thesis"),
+        }
+
         save_yaml(merged, str(trial_dir / "train_config_merged.yaml"))
 
         # Keep HPO metadata separate so train.py cannot overwrite it

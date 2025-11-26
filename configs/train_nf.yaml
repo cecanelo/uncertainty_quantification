@@ -30,5 +30,5 @@ nf:
     transform: affine     # 'affine' or 'spline'
     num_layers: 6
     hidden_features: 256
-    actnorm: true
+    actnorm: false
     num_bins: 8           # used only when transform: spline

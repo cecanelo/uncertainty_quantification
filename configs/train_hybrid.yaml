@@ -16,7 +16,6 @@ model:
     hidden_dims: [512, 256, 128]
     activation: "relu"
     dropout: 0.10       # kept active at train; at inference, enable MC dropout
-    batchnorm: true
 
 training:
     device: "cuda"

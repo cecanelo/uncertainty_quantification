@@ -12,7 +12,7 @@ class MLP(nn.Module):
         hidden_dims: List[int],
         activation: str = "relu",
         dropout: float = 0.1,
-        use_batchnorm: bool = True,
+        use_batchnorm: bool = False,
     ):
         super().__init__()
         act = {"relu": nn.ReLU, "gelu": nn.GELU, "tanh": nn.Tanh}.get(activation.lower(), nn.ReLU)
@@ -67,7 +67,7 @@ class RegressionHead(nn.Module):
 
 class MLPRegressor(nn.Module):
     def __init__(self, in_dim: int, hidden_dims: List[int], head_type: str = "point",
-                 activation: str = "relu", dropout: float = 0.1, use_batchnorm: bool = True):
+                 activation: str = "relu", dropout: float = 0.1, use_batchnorm: bool = False):
         super().__init__()
         self.backbone = MLP(in_dim, hidden_dims, activation, dropout, use_batchnorm)
         feat_dim = hidden_dims[-1] if len(hidden_dims) else in_dim

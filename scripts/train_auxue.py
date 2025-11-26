@@ -365,7 +365,7 @@ def main():
         hidden=mcfg.get("ale_hidden_dims", [512, 256]),
         activation=mcfg.get("activation", "relu"),
         dropout=float(mcfg.get("dropout", 0.1)),
-        batchnorm=bool(mcfg.get("batchnorm", True)),
+        batchnorm=False,
     ).to(device)
 
     net_dido = DidoDirichletNet(
@@ -374,7 +374,7 @@ def main():
         K=K,
         activation=mcfg.get("activation", "relu"),
         dropout=float(mcfg.get("dropout", 0.1)),
-        batchnorm=bool(mcfg.get("batchnorm", True)),
+        batchnorm=False,
     ).to(device)
 
     # Optimizer

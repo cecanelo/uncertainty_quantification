@@ -32,6 +32,32 @@ def _load_meta(outdir: Path) -> Dict[str, Any]:
         return json.load(f)
 
 
+def _delta_sigma_orig(head_type: str,
+                      sigma_z: np.ndarray | None,
+                      mu_orig: np.ndarray,
+                      target_meta: Dict[str, str]) -> np.ndarray:
+    """
+    Map transformed-space scale to an approximate original-space std via the delta method.
+    - point: returns NaNs.
+    - gauss: sigma_z is already a std in transformed space.
+    - laplace: sigma_z should already be a std-like quantity (e.g., sqrt(2) * b_z).
+    """
+    n = mu_orig.shape[0]
+    if sigma_z is None:
+        return np.full(n, np.nan, dtype=float)
+
+    sigma_z = sigma_z.reshape(-1)
+    if head_type == "point":
+        return np.full(n, np.nan, dtype=float)
+
+    mode = (target_meta or {}).get("mode", "none").lower()
+    if mode == "log1p":
+        # derivative dy/dz = exp(z) = y + 1; approximate with predicted y
+        return (mu_orig + 1.0) * sigma_z
+    # identity / none
+    return sigma_z
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--config", required=True, help="Train config YAML used for the run")
@@ -92,7 +118,7 @@ def main():
         head_type=head_type,
         activation=model_cfg.get("activation", "relu"),
         dropout=float(model_cfg.get("dropout", 0.1)),
-        use_batchnorm=bool(model_cfg.get("batchnorm", True)),
+        use_batchnorm=False,  # batch norm disabled for eval (and training)
     ).to(device)
 
     ckpt_path = outdir / "model.pt"
@@ -218,27 +244,55 @@ def main():
         id_col = "row_index"
         ids_split = idx
 
-    if args.split == "test":
-        preds_path = eval_dir / "test_preds.csv"
-    else:
-        preds_path = eval_dir / f"preds_{args.split}.csv"
+    preds_path = eval_dir / ("test_preds.csv" if args.split == "test" else f"preds_{args.split}.csv")
 
-    # Header depends on whether we have scales (gauss/laplace) or not (point)
+    # Aleatoric scale mapped to original units (std-like). For laplace we first turn b_z into std_z.
+    sigma_z = None
     if scale_concat is not None:
-        header = [id_col, "y_true", "y_pred", "y_scale"]
-    else:
-        header = [id_col, "y_true", "y_pred"]
+        sigma_z = scale_concat
+        if head_type == "laplace":
+            sigma_z = np.sqrt(2.0) * sigma_z
+    sigma_ale_orig = _delta_sigma_orig(head_type, sigma_z, mu_orig, y_meta)
+
+    header = [
+        "id",
+        "split",
+        "head_type",
+        "mc_flag",
+        "n_mc",
+        "y_true",
+        "y_pred_det",
+        "y_pred_mc_mean",
+        "sigma_ale_raw",
+        "sigma_epi_raw",
+    ]
 
     with preds_path.open("w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(header)
-        if scale_concat is not None:
-            for key, yt_o_i, mu_o_i, s_i in zip(ids_split, yt_orig, mu_orig, scale_concat):
-                writer.writerow([key, float(yt_o_i), float(mu_o_i), float(s_i)])
-        else:
-            for key, yt_o_i, mu_o_i in zip(ids_split, yt_orig, mu_orig):
-                writer.writerow([key, float(yt_o_i), float(mu_o_i)])
+        for key, yt_o_i, mu_o_i, s_ale in zip(ids_split, yt_orig, mu_orig, sigma_ale_orig):
+            writer.writerow([
+                key,
+                args.split,
+                head_type,
+                0,      # mc_flag
+                0,      # n_mc
+                float(yt_o_i),
+                float(mu_o_i),
+                float(mu_o_i),  # deterministic eval => mc mean equals det pred
+                float(s_ale) if np.isfinite(s_ale) else np.nan,
+                np.nan,         # no epistemic component here
+            ])
 
+    meta_payload = {
+        "head_type": head_type,
+        "split": args.split,
+        "target_transform": y_meta.get("mode", "none"),
+        "mc_flag": 0,
+        "n_mc": 0,
+    }
+    with (eval_dir / "metadata.json").open("w") as f:
+        json.dump(meta_payload, f, indent=2)
 
     print(f"[eval] Saved predictions to: {preds_path}")
 

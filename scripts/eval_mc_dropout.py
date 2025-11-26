@@ -7,7 +7,7 @@ What it does
 - Loads a trained checkpoint and preprocessing metadata.
 - Rebuilds features for requested splits (train/val/test) using stored encoders.
 - Runs N stochastic forward passes with dropout active.
-- Writes per-split CSVs with id, mean prediction, and one column per MC sample.
+- Writes per-split CSVs with a unified schema (id, split, head_type, deterministic + MC stats in original units, optional MC samples).
 
 CLI
 ---
@@ -69,7 +69,7 @@ import numpy as np
 import torch
 import yaml
 
-from data import _prepare_frame, _apply_encoders, DataConfig, _target_transform
+from data import _prepare_frame, _apply_encoders, DataConfig, _target_transform, inverse_target
 from model_base import MLPRegressor
 
 
@@ -82,6 +82,26 @@ def _override_dropout(model: torch.nn.Module, p: float) -> None:
     for m in model.modules():
         if isinstance(m, torch.nn.Dropout):
             m.p = p
+
+
+def _delta_sigma_orig(head_type: str,
+                      sigma_z: Optional[np.ndarray],
+                      mu_orig: np.ndarray,
+                      target_meta: dict) -> np.ndarray:
+    """
+    Map transformed-space scale to an approximate original-space std via the delta method.
+    For laplace, sigma_z is expected to be std_z (sqrt(2)*b_z).
+    """
+    n = mu_orig.shape[0]
+    if sigma_z is None:
+        return np.full(n, np.nan, dtype=float)
+    sigma_z = sigma_z.reshape(-1)
+    if head_type == "point":
+        return np.full(n, np.nan, dtype=float)
+    mode = (target_meta or {}).get("mode", "none").lower()
+    if mode == "log1p":
+        return (mu_orig + 1.0) * sigma_z
+    return sigma_z
 
 
 def _subset_indices(idx: np.ndarray, count: Optional[int], frac: Optional[float], rng: np.random.Generator) -> np.ndarray:
@@ -135,6 +155,36 @@ def _run_mc_passes(
     return np.stack(preds, axis=0)  # [n_samples, N]
 
 
+def _deterministic_pass(
+    model: torch.nn.Module,
+    loader: torch.utils.data.DataLoader,
+    device: torch.device,
+    head_type: str,
+) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+    """
+    Run a deterministic forward pass (dropout disabled) to get mean predictions
+    and aleatoric scale in transformed space.
+    Returns (mu_z, sigma_z_std) where sigma_z_std is std-like (sqrt(2)*b for laplace).
+    """
+    preds = []
+    scales = []
+    model.eval()
+    with torch.no_grad():
+        for xb, _ in loader:
+            xb = xb.to(device, non_blocking=True)
+            out = model(xb)
+            preds.append(out["mu"].detach().cpu().numpy())
+            if head_type == "gauss":
+                scales.append(out["sigma"].detach().cpu().numpy())
+            elif head_type == "laplace":
+                # convert Laplace scale b_z to std-like in transformed space
+                scales.append((np.sqrt(2.0) * out["b"]).detach().cpu().numpy())
+
+    mu_z = np.concatenate(preds, axis=0).reshape(-1)
+    sigma_z = np.concatenate(scales, axis=0).reshape(-1) if scales else None
+    return mu_z, sigma_z
+
+
 def _crps_empirical(samples: np.ndarray, y_true: np.ndarray) -> float:
     """
     Empirical CRPS for a single predictive sample set and scalar target.
@@ -146,26 +196,59 @@ def _crps_empirical(samples: np.ndarray, y_true: np.ndarray) -> float:
     return float(mean_abs - pair_abs)
 
 
-def _save_csv(
+def _write_unified_csv(
     path: Path,
+    *,
     ids: np.ndarray,
-    mc_samples: np.ndarray,
+    split: str,
+    head_type: str,
+    mc_flag: int,
+    n_mc: int,
+    y_true_orig: np.ndarray,
+    y_pred_det_orig: np.ndarray,
+    y_pred_mc_mean_orig: np.ndarray,
+    sigma_ale_orig: np.ndarray,
+    sigma_epi_orig: np.ndarray,
     include_samples: bool,
+    mc_samples_orig: Optional[np.ndarray],
 ) -> None:
-    means = mc_samples.mean(axis=0)
-    stds = mc_samples.std(axis=0)
-
+    """
+    Write per-sample rows with the unified schema, optionally including MC samples (original units).
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
+    header = [
+        "id",
+        "split",
+        "head_type",
+        "mc_flag",
+        "n_mc",
+        "y_true",
+        "y_pred_det",
+        "y_pred_mc_mean",
+        "sigma_ale_raw",
+        "sigma_epi_raw",
+    ]
+    if include_samples and mc_samples_orig is not None:
+        header.extend([f"y_pred_mc_{i}" for i in range(1, mc_samples_orig.shape[0] + 1)])
+
     with path.open("w", newline="") as f:
         writer = csv.writer(f)
-        header = ["id", "y_pred_mc_mean", "y_pred_mc_std"]
-        if include_samples:
-            header.extend([f"y_pred_mc_{i}" for i in range(1, mc_samples.shape[0] + 1)])
-        writer.writerow([h.lower() for h in header])
-        for i, mid, ms, s in zip(range(len(ids)), ids, means, stds):
-            row = [mid, float(ms), float(s)]
-            if include_samples:
-                row.extend([float(v) for v in mc_samples[:, i]])
+        writer.writerow(header)
+        for j, mid in enumerate(ids):
+            row = [
+                mid,
+                split,
+                head_type,
+                mc_flag,
+                n_mc,
+                float(y_true_orig[j]),
+                float(y_pred_det_orig[j]) if np.isfinite(y_pred_det_orig[j]) else np.nan,
+                float(y_pred_mc_mean_orig[j]),
+                float(sigma_ale_orig[j]) if np.isfinite(sigma_ale_orig[j]) else np.nan,
+                float(sigma_epi_orig[j]) if np.isfinite(sigma_epi_orig[j]) else np.nan,
+            ]
+            if include_samples and mc_samples_orig is not None:
+                row.extend([float(v) for v in mc_samples_orig[:, j]])
             writer.writerow(row)
 
 
@@ -230,7 +313,7 @@ def evaluate(cfg: dict, override_mode: Optional[str] = None) -> None:
         head_type=head_type,
         activation=activation,
         dropout=dropout,
-        use_batchnorm=use_batchnorm,
+        use_batchnorm=False,  # batch norm disabled for eval/training
     ).to(device)
     state = torch.load(ckpt_path, map_location=device)
     model.load_state_dict(state["model_state_dict"])
@@ -270,6 +353,9 @@ def evaluate(cfg: dict, override_mode: Optional[str] = None) -> None:
 
     from torch.utils.data import DataLoader, TensorDataset
 
+    if dropout <= 0:
+        _log("[mc-dropout] Warning: model dropout probability is 0. MC predictions may have ~0 epistemic spread.")
+
     for split in splits:
         split_key = split.lower()
         if split_key not in preproc_meta.get("splits", {}):
@@ -292,31 +378,71 @@ def evaluate(cfg: dict, override_mode: Optional[str] = None) -> None:
             drop_last=False,
         )
 
+        # MC passes (transformed space)
         mc_samples = _run_mc_passes(model, loader, n_samples=n_samples, device=device)
-        ids_split = ids_all[idx]
-        y_true = ys.numpy().reshape(-1)
-        means_split = mc_samples.mean(axis=0)
-        variances_split = mc_samples.var(axis=0) + 1e-8
+        means_z = mc_samples.mean(axis=0)
 
+        # Deterministic pass (dropout disabled) for baseline prediction + aleatoric scale
+        mu_det_z, sigma_det_z = _deterministic_pass(model, loader, device, head_type)
+
+        ids_split = ids_all[idx]
+        y_true_z = ys.numpy().reshape(-1)
+
+        # Original-space values
+        y_meta = extra["y_meta"]
+        y_true_orig = inverse_target(y_true_z.reshape(-1, 1), y_meta).reshape(-1)
+        mu_det_orig = inverse_target(mu_det_z.reshape(-1, 1), y_meta).reshape(-1)
+        mc_samples_orig = inverse_target(mc_samples, y_meta)
+        means_orig = mc_samples_orig.mean(axis=0)
+        stds_orig = mc_samples_orig.std(axis=0)
+
+        sigma_ale_orig = _delta_sigma_orig(head_type, sigma_det_z, mu_det_orig, y_meta)
+
+        # Metrics remain in transformed space for compatibility
+        variances_split = mc_samples.var(axis=0) + 1e-8
         nll = np.mean(
             0.5 * np.log(2 * np.pi * variances_split)
-            + ((y_true - means_split) ** 2) / (2 * variances_split)
+            + ((y_true_z - means_z) ** 2) / (2 * variances_split)
         )
         crps_vals = []
         for j in range(mc_samples.shape[1]):
-            crps_vals.append(_crps_empirical(mc_samples[:, j], y_true[j]))
+            crps_vals.append(_crps_empirical(mc_samples[:, j], y_true_z[j]))
         crps_mean = float(np.mean(crps_vals))
 
         out_path = save_dir / f"mc_preds_{split_key}.csv"
-        _save_csv(out_path, ids_split, mc_samples, include_samples=include_samples)
+        _write_unified_csv(
+            out_path,
+            ids=ids_split,
+            split=split_key,
+            head_type=head_type,
+            mc_flag=1,
+            n_mc=n_samples,
+            y_true_orig=y_true_orig,
+            y_pred_det_orig=mu_det_orig,
+            y_pred_mc_mean_orig=means_orig,
+            sigma_ale_orig=sigma_ale_orig,
+            sigma_epi_orig=stds_orig,
+            include_samples=include_samples,
+            mc_samples_orig=mc_samples_orig if include_samples else None,
+        )
+
         split_counts[split_key] = len(idx)
         metrics[split_key] = {
             "nll": float(nll),
             "crps": crps_mean,
             "n_rows": int(len(idx)),
             "n_samples": int(mc_samples.shape[0]),
+            "head_type": head_type,
+            "target_transform": y_meta.get("mode", "none"),
         }
         _log(f"[mc-dropout] split={split_key} n={len(idx)} wrote: {out_path}")
+
+    # annotate metrics with global context
+    metrics["_meta"] = {
+        "head_type": head_type,
+        "target_transform": extra["y_meta"].get("mode", "none"),
+        "n_samples": n_samples,
+    }
 
     if split_counts:
         _log("[mc-dropout] evaluated rows per split:")
@@ -352,11 +478,13 @@ def evaluate(cfg: dict, override_mode: Optional[str] = None) -> None:
             "job_id": job_id,
             "mode": mode,
             "device": str(device),
+            "head_type": head_type,
         },
         "paths": {
             "save_dir": str(save_dir),
             "metrics": str(metrics_path),
         },
+        "target_transform": extra["y_meta"].get("mode", "none"),
     }
     metadata_path = save_dir / "run_metadata.json"
     with metadata_path.open("w") as f:

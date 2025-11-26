@@ -70,37 +70,37 @@ def main() -> None:
     parser.add_argument(
         "--time",
         type=str,
-        default="02:00:00",
+        default=None,
         help="SLURM walltime for --mode slurm (e.g. 02:00:00).",
     )
     parser.add_argument(
         "--mem-gb",
         type=int,
-        default=32,
+        default=None,
         help="SLURM memory in GB for --mode slurm.",
     )
     parser.add_argument(
         "--cpus",
         type=int,
-        default=8,
+        default=None,
         help="SLURM CPUs per task for --mode slurm.",
     )
     parser.add_argument(
         "--gpus",
         type=int,
-        default=1,
+        default=None,
         help="Number of GPUs to request for --mode slurm.",
     )
     parser.add_argument(
         "--job-name",
         type=str,
-        default="train_from_best",
+        default=None,
         help="SLURM job name for --mode slurm.",
     )
     parser.add_argument(
         "--conda-env",
         type=str,
-        default="thesis",
+        default=None,
         help="Conda environment to activate inside the SLURM job.",
     )
     parser.add_argument(
@@ -131,8 +131,11 @@ def main() -> None:
         raise SystemExit("best_hparams.json is missing 'trial_dir' field.")
     trial_dir = Path(trial_dir_str).resolve()
 
-    # HPO study name, e.g. "base_full_point_adjusted_2_20251118-1952"
-    hpo_name = best_root.parent.name
+    # HPO study name from the export payload (preferred over folder name)
+    hpo_name = payload.get("study", {}).get("name")
+    if not hpo_name:
+        # Fallback to folder name if the payload is missing the study info
+        hpo_name = best_root.parent.name
 
     # Root for final trainings of this HPO:
     #   output/trainings/training_<HPO_NAME>/
@@ -183,18 +186,18 @@ def main() -> None:
 
     # --- SLURM resources: allow config defaults, overridden by CLI ---
     slurm_cfg = cfg.get("slurm", {}) or {}
-    # If the CLI partition is provided, let it override the merged config.
-    # Otherwise fall back to config, then a safe default.
+    # CLI overrides take priority when provided; otherwise fall back to config, then a safe default.
     partition = args.partition if args.partition is not None else slurm_cfg.get("partition", "STUD")
-    time_str  = slurm_cfg.get("time", args.time)
-    mem_gb    = int(slurm_cfg.get("mem_gb", args.mem_gb))
-    cpus      = int(slurm_cfg.get("cpus", args.cpus))
-    gpus      = int(slurm_cfg.get("gpus", args.gpus))
-    if args.job_name != "train_from_best":
+    time_str  = args.time if args.time is not None else slurm_cfg.get("time", "02:00:00")
+    mem_gb    = int(args.mem_gb) if args.mem_gb is not None else int(slurm_cfg.get("mem_gb", 32))
+    cpus      = int(args.cpus) if args.cpus is not None else int(slurm_cfg.get("cpus", 4))
+    gpus      = int(args.gpus) if args.gpus is not None else int(slurm_cfg.get("gpus", 0))
+    if args.job_name is not None:
         job_name = args.job_name
     else:
-        job_name = slurm_cfg.get("job_name", args.job_name)
-    conda_env = slurm_cfg.get("conda_env", args.conda_env)
+        # Prefer the HPO study name as the default job name to keep lineage clear
+        job_name = hpo_name
+    conda_env = args.conda_env if args.conda_env is not None else slurm_cfg.get("conda_env", "thesis")
 
 
     # --- Build a per-run tag (job_name + optional suffix + optional seed + optional timestamp) ---
@@ -229,6 +232,17 @@ def main() -> None:
     train_cfg = cfg.get("training", {}) or {}
     train_cfg["eval_after_train"] = True
     cfg["training"] = train_cfg
+
+    # --- Persist resolved slurm overrides back into the derived config ---
+    cfg["slurm"] = {
+        "partition": partition,
+        "time": time_str,
+        "mem_gb": mem_gb,
+        "cpus": cpus,
+        "gpus": gpus,
+        "job_name": job_name,
+        "conda_env": conda_env,
+    }
 
     # # If the config defines a training_outdir, let it override the suggested one
     # training_outdir_cfg = io_section.get("training_outdir")
@@ -270,12 +284,14 @@ def main() -> None:
         out_log = logs_dir / f"{log_stub}_%j.out"
         err_log = logs_dir / f"{log_stub}_%j.err"
 
+        gres_line = f"#SBATCH --gres=gpu:{gpus}" if gpus and gpus > 0 else ""
+
         sbatch_script = f"""#!/bin/bash
 #SBATCH --job-name={job_name}
 #SBATCH --partition={partition}
 #SBATCH --cpus-per-task={cpus}
 #SBATCH --mem={mem_gb}G
-#SBATCH --gres=gpu:{gpus}
+{gres_line}
 #SBATCH --time={time_str}
 #SBATCH --output={out_log}
 #SBATCH --error={err_log}

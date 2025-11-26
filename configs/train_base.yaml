@@ -1,13 +1,13 @@
 seed: 3
 
 slurm:
-    partition: "STUD"
-    time: "01:00:00"
-    mem_gb: 32
-    cpus: 4
+    partition: "TEST"
+    time: "00:56:00"
+    mem_gb: 30
+    cpus: 2
     gpus: 1
-    job_name: "base_point"
-    conda_env: "thesis"
+    job_name: "point"
+    conda_env: "thesis_pascal"
 
 data:
     csv_path: "/home/canelo/uncertainty_quantification/datasets/craigslist_cleaned.csv"
@@ -25,7 +25,6 @@ model:
     hidden_dims: [512, 256, 128]
     activation: "relu"
     dropout: 0.10
-    batchnorm: true
 
 training:
     device: "cuda"
@@ -35,6 +34,13 @@ training:
     grad_clip: 0.0
     point_loss: "huber"   # mae|mse|huber
     eval_after_train: false
+
+    mc_eval:
+        enabled: true      # set true to run MC-dropout eval after training
+        n_samples: 5
+        batch_size: 512
+        include_samples: true
+        p_drop: null        # optional dropout override at inference
 
     early_stopping:
         enabled: true

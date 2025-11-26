@@ -1,4 +1,4 @@
-seed: 1
+seed: 3
 
 slurm:
     partition: "STUD"
@@ -25,7 +25,6 @@ model:
     hidden_dims: [512, 256, 128]
     activation: "relu"
     dropout: 0.10
-    batchnorm: true
 
 training:
     device: "cuda"
@@ -34,7 +33,14 @@ training:
     weight_decay: 0.0
     grad_clip: 0.0
     point_loss: "huber"   # mae|mse|huber
-    eval_after_train: true
+    eval_after_train: false
+
+    mc_eval:
+        enabled: true      # set true to run MC-dropout eval after training
+        n_samples: 5
+        batch_size: 512
+        include_samples: true
+        p_drop: null        # optional dropout override at inference
 
     early_stopping:
         enabled: true
