@@ -1,0 +1,35 @@
+run:
+  mode: "slurm"          # "local" or "slurm"
+  partition: "TEST"
+  time: "00:10:00"
+  mem_gb: 30
+  cpus: 4
+  gpus: 1
+  conda_env: "thesis_pascal"
+  job_name: "eval_mc"
+  logs_dir: "logs"
+
+model:
+  run_dir: "/home/canelo/uncertainty_quantification/final_models/base_model/model/training_base_point_2_20251122-1307/base_point_s3_20251122-210436_284574"
+  checkpoint: "model.pt"
+  preproc_meta: "preproc_meta.json"
+  used_config: "used_config.yaml"
+
+data:
+  csv_path: "/home/canelo/uncertainty_quantification/datasets/craigslist_cleaned.csv"
+  target_col: "price"
+  target_transform: "none"
+
+mc_dropout:
+  enabled: true
+  n_samples: 100
+  p_drop: 0.2          # override dropout p at inference; null keeps trained value
+  splits: ["train", "val", "test"]
+  batch_size: 512
+  sample_count: null    # optional: absolute count per split
+  sample_frac: null     # optional: fraction per split (ignored if sample_count set)
+  seed: 3
+
+io:
+  save_dir: "outputs/evals/mc_base_point_s3_20251122-210436_284574"
+  include_samples: true

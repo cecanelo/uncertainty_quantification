@@ -1,0 +1,44 @@
+study:
+    name: "tiny_mc_dropout"
+    storage: "sqlite:///optuna_studies/hpo.db"
+    direction: "minimize"
+    resume: true
+
+budget:
+    n_trials: 3
+
+objective:
+    split: "val"
+    metric: "crps"    # or "crps"
+
+io:
+    outputs_root: "outputs/optuna"
+    trial_dir_template: "trial_{trial:05d}"
+
+base_config:
+    eval_config_path: "configs/eval_mc_dropout.yaml"
+
+repro:
+    snapshot_hpo_config: true
+    snapshot_eval_config: true
+
+resources:
+    partition: "TEST"
+    time: "00:55:00"
+    mem_gb: 30
+    cpus_per_task: 2
+    gpus: 1
+    conda_env: "thesis_pascal"
+    job_name: "hpo_mc"
+    logs_root: "logs"
+    max_parallel: 1   # set higher (e.g., 4) on STUD to cap concurrent array tasks
+
+pruner:
+    name: "median"   # "none" or "median"
+    params:
+        n_startup_trials: 5
+
+search_space:
+    - { name: "mc_dropout.p_drop",      dist: "uniform", low: 0.02, high: 0.35 }
+    - { name: "mc_dropout.n_samples",   dist: "choice", choices: [5, 10, 20, 50, 100] }
+    - { name: "mc_dropout.sample_frac",  dist: "choice", choices: [null, 0.1, 0.2, 0.5] }
