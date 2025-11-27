@@ -1,0 +1,52 @@
+seed: 42
+
+data:
+  csv_path: "/home/canelo/uncertainty_quantification/datasets/craigslist_cleaned.csv"
+
+base_artifacts:
+  # Path to the base Gaussian run's preproc_meta.json
+  preproc_meta_path: "/home/canelo/uncertainty_quantification/outputs/trainings/training_gauss/gauss_run/preproc_meta.json"
+
+base_run:
+  # Used for auto-creating flow CSVs if they are missing
+  config_path: "/home/canelo/uncertainty_quantification/configs/train_gauss.yaml"
+  model_dir: "/home/canelo/uncertainty_quantification/outputs/trainings/training_gauss/gauss_run"
+
+base_preds:
+  # If present, use these flow CSVs; otherwise auto-create them below
+  # train_csv: "/home/canelo/uncertainty_quantification/outputs/evals/gauss_run/flow_train.csv"
+  # val_csv: "/home/canelo/uncertainty_quantification/outputs/evals/gauss_run/flow_val.csv"
+
+flow_dumps:
+  auto_create: true
+  output_dir: null   # default: NF outdir (recommended)
+  # info on whether files were created or reused is recorded in run_meta
+
+training:
+  device: "cuda"
+  epochs: 50
+  lr: 0.0005
+  weight_decay: 0.0
+  batch_size: 1024
+  num_workers: 4
+  pin_memory: true
+
+nf:
+  transform: "affine"      # "affine" (MAF) or "spline"
+  hidden_features: 256
+  num_layers: 6
+  actnorm: true
+  num_bins: 8              # used for spline; ignored for affine
+  standardize: true        # use z = (y_true_t - mu_t) / scale_t
+
+io:
+  outdir: "/home/canelo/uncertainty_quantification/outputs/flows/nf_{job}_{ts}_{jobid}"
+
+slurm:
+  partition: "TEST"
+  time: "00:15:00"
+  mem_gb: 16
+  cpus: 4
+  gpus: 1
+  job_name: "nf_gauss"
+  conda_env: "thesis_pascal"

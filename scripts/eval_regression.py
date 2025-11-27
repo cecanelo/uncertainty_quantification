@@ -64,6 +64,10 @@ def main():
     p.add_argument("--outdir", required=True, help="Output directory of the training run")
     p.add_argument("--split", default="val", choices=["train", "val", "test"],
                    help="Which split to evaluate (default: val)")
+    p.add_argument("--flow-dump", action="store_true",
+                   help="When set, also write flow_<split>.csv (y_true_t, mu_t, scale_t) for gauss/laplace heads.")
+    p.add_argument("--flow-outdir", default=None,
+                   help="Directory to save flow CSV (default: eval_dir when --flow-dump is set).")
     args = p.parse_args()
 
     cfg_path = Path(args.config)
@@ -295,6 +299,21 @@ def main():
         json.dump(meta_payload, f, indent=2)
 
     print(f"[eval] Saved predictions to: {preds_path}")
+
+    # --- 12) Optional flow-friendly dump for NF residual modeling (gauss/laplace only) ---
+    if args.flow_dump and head_type in ("gauss", "laplace") and scale_concat is not None:
+        flow_dir = Path(args.flow_outdir) if args.flow_outdir else eval_dir
+        flow_dir.mkdir(parents=True, exist_ok=True)
+        flow_path = flow_dir / f"flow_{args.split}.csv"
+        scale_t = scale_concat.astype(float)
+        if head_type == "laplace":
+            scale_t = np.sqrt(2.0) * scale_t
+        with flow_path.open("w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["id", "y_true_t", "mu_t", "scale_t", "head_type"])
+            for rid, y_t_i, mu_t_i, s_t_i in zip(idx, yt_concat, mu_concat, scale_t):
+                writer.writerow([int(rid), float(y_t_i), float(mu_t_i), float(s_t_i), head_type])
+        print(f"[eval] Saved flow preds to: {flow_path}")
 
 
 if __name__ == "__main__":

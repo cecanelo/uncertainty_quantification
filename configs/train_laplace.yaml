@@ -1,4 +1,4 @@
-seed: 3
+seed: 1
 
 slurm:
     partition: "TEST"
@@ -6,14 +6,14 @@ slurm:
     mem_gb: 30
     cpus: 4
     gpus: 1
-    job_name: "laplace"
+    job_name: "laplace_esm"
     conda_env: "thesis_pascal"
 
 data:
     csv_path: "/home/canelo/uncertainty_quantification/datasets/craigslist_cleaned.csv"
     target_col: "price"
     target_transform: "none"
-    split_seed: 42
+    split_seed: 1
     split_fracs: [0.7, 0.1, 0.2]
     batch_size: 2048
     num_workers: 2
@@ -28,7 +28,7 @@ model:
 
 training:
     device: "cuda"
-    epochs: 100
+    epochs: 10
     lr: 0.001
     weight_decay: 0.0
     grad_clip: 0.0
@@ -36,7 +36,7 @@ training:
     eval_after_train: false
 
     mc_eval:
-        enabled: true      # set true to run MC-dropout eval after training
+        enabled: false      # set true to run MC-dropout eval after training
         n_samples: 5
         batch_size: 512
         include_samples: true
@@ -46,6 +46,10 @@ training:
         enabled: true
         patience: 30
         min_delta: 0.0
+
+ensemble:
+    enabled: true        # set true to train an ensemble via a launcher script
+    n_members: 3          # number of ensemble members when enabled
 
 objective: "val_nll"
 

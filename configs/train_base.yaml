@@ -47,6 +47,10 @@ training:
         patience: 30
         min_delta: 0.0
 
+ensemble:
+    enabled: false        # set true to train an ensemble via a launcher script
+    n_members: 5          # number of ensemble members when enabled
+
 objective: "val_mae_orig"         # "val_mae"   "val_mae_orig"  
 
 io:
