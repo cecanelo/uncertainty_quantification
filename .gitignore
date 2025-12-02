@@ -12,3 +12,5 @@ logs/
 datasets/
 __pycache__/
 .venv/
+Discretization-Induced Dirichlet Posterior for Robust Uncertainty Quantification on Regression.pdf
+Normalizing Flows for Probabilistic Modeling and Inference.pdf

@@ -1,11 +1,11 @@
 study:
-    name: "gauss_small"
+    name: "gauss_tiny"
     storage: "sqlite:///optuna_studies/hpo.db"
     direction: "minimize"
     resume: true
 
 budget:
-    n_trials: 10                # small run now; increase to 20–50 for full HPO
+    n_trials: 3                # small run now; increase to 20–50 for full HPO
 
 resources:
     partition: "TEST"          # STUD has GPUs
@@ -38,7 +38,7 @@ pruner:
         n_startup_trials: 15
 
 search_space:
-    - { name: "training.epochs",       dist: "choice", choices: [25] }
+    - { name: "training.epochs",       dist: "choice", choices: [5] }
     - { name: "training.lr",           dist: "loguniform", low: 1.0e-4, high: 3.0e-3 }
     - { name: "training.weight_decay", dist: "loguniform", low: 1.0e-6, high: 1.0e-2 }
     - { name: "training.grad_clip",    dist: "uniform", low: 0.0, high: 1.0, step: 0.1 }

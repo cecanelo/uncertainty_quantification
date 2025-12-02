@@ -56,4 +56,4 @@ objective: "val_nll"
 io:
     outdir: "."
     evals_root: "outputs/evals/"
-    training_outdir: "outputs/trainings/{job_name}"
+    training_outdir: "outputs/trainings/laplace/{job}_{ts}_{jobid}"

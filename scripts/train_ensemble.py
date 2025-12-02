@@ -27,7 +27,7 @@ Usage examples:
 Notes:
   - We intentionally leave `train_regression.py` unchanged; this script just orchestrates.
   - The base config is snapshotted into ensemble_root/base_config.yaml for reproducibility.
-  - If --ensemble-root is omitted, defaults to outputs/ensembles/<job|cfg>_<timestamp>.
+  - If --ensemble-root is omitted, defaults to outputs/trainings/ensembles/<job|cfg>_<timestamp>.
 """
 from __future__ import annotations
 import argparse
@@ -48,6 +48,18 @@ TRAIN_SCRIPT = REPO_ROOT / "scripts" / "train_regression.py"
 def load_yaml(path: Path) -> Dict[str, Any]:
     with path.open("r") as f:
         return yaml.safe_load(f)
+
+
+def _infer_head_type(base_cfg: Dict[str, Any]) -> str:
+    try:
+        return str(base_cfg.get("model", {}).get("head_type", "")).lower() or "unknown"
+    except Exception:
+        return "unknown"
+
+
+def _prefix_job(job: str, head: str) -> str:
+    pref = f"esm_{head}_{job}"
+    return pref if not job.startswith("esm_") else job
 
 
 def save_yaml(obj: Dict[str, Any], path: Path) -> None:
@@ -91,7 +103,23 @@ def _write_manifest(root: Path, base_cfg_path: Path, n_members: int, mode: str, 
         json.dump(manifest, f, indent=4)
 
 
-def submit_slurm_array(base_cfg_path: Path, ensemble_root: Path, n_members: int, base_cfg: Dict[str, Any]) -> None:
+def _resolve_root(raw: str, cfg_path: Path, base_cfg: Dict[str, Any]) -> Path:
+    ts_env = os.environ.get("ENSEMBLE_TS")
+    ts = ts_env if ts_env else datetime.now().strftime("%Y%m%d-%H%M%S")
+    jobid_env = os.environ.get("SLURM_ARRAY_JOB_ID") or os.environ.get("SLURM_JOB_ID") or "NA"
+    head = _infer_head_type(base_cfg)
+    job_raw = base_cfg.get("slurm", {}).get("job_name") or cfg_path.stem
+    job = _prefix_job(job_raw, head)
+    filled = (
+        raw.replace("{job}", str(job))
+           .replace("{ts}", ts)
+           .replace("{jobid}", jobid_env)
+    )
+    return Path(filled).resolve()
+
+
+def submit_slurm_array(base_cfg_path: Path, ensemble_root_tpl: str, n_members: int, base_cfg: Dict[str, Any]) -> None:
+    head = _infer_head_type(base_cfg)
     # Pull slurm defaults from base config
     slurm_cfg = base_cfg.get("slurm", {}) or {}
     partition = slurm_cfg.get("partition", "TEST")
@@ -100,7 +128,8 @@ def submit_slurm_array(base_cfg_path: Path, ensemble_root: Path, n_members: int,
     cpus = int(slurm_cfg.get("cpus", 2))
     gpus = int(slurm_cfg.get("gpus", 0))
     conda_env = slurm_cfg.get("conda_env", "thesis")
-    job_name = slurm_cfg.get("job_name", "ensemble")
+    job_name_raw = slurm_cfg.get("job_name", "ensemble")
+    job_name = _prefix_job(job_name_raw, head)
     logs_root = Path("logs").resolve()
     logs_root.mkdir(parents=True, exist_ok=True)
 
@@ -132,8 +161,9 @@ def submit_slurm_array(base_cfg_path: Path, ensemble_root: Path, n_members: int,
 
     exports = [
         f"ENSEMBLE_CONFIG={base_cfg_path}",
-        f"ENSEMBLE_ROOT={ensemble_root}",
+        f"ENSEMBLE_ROOT_TEMPLATE={ensemble_root_tpl}",
         f"N_MEMBERS={n_members}",
+        f"ENSEMBLE_TS={ts}",
     ]
     lines += [
         f"export {' '.join(exports)}",
@@ -141,7 +171,7 @@ def submit_slurm_array(base_cfg_path: Path, ensemble_root: Path, n_members: int,
         'source "$HOME/miniconda3/etc/profile.d/conda.sh"',
         f"conda activate {conda_env}",
         'echo "[env] host=$(hostname) date=$(date) array=$SLURM_ARRAY_TASK_ID"',
-        f"python '{this_script}' --config '{base_cfg_path}' --ensemble-root '{ensemble_root}' --mode array-worker",
+        f"python '{this_script}' --config '{base_cfg_path}' --mode array-worker",
     ]
 
     sb_script = "\n".join(lines) + "\n"
@@ -159,44 +189,99 @@ def submit_slurm_array(base_cfg_path: Path, ensemble_root: Path, n_members: int,
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Train an ensemble of models using train_regression.py")
-    ap.add_argument("--config", required=True, help="Base train config YAML")
-    ap.add_argument("--ensemble-root", required=False, help="Root folder for ensemble (default: outputs/ensembles/<job|config>_<ts>)")
+    ap.add_argument("--config", help="Base train config YAML (required unless --wrapper is provided)")
+    ap.add_argument("--wrapper", help="Optional wrapper YAML with base_config, ensemble settings, io.ensemble_root")
+    ap.add_argument("--ensemble-root", required=False, help="Root folder for ensemble (default from wrapper or derived template)")
     ap.add_argument("--mode", choices=["local", "slurm", "array-worker"], default="local",
                     help="local: run all members here; slurm: submit array; array-worker: internal")
     ap.add_argument("--base-seed", type=int, default=None, help="Override base seed (else uses cfg['seed'])")
     args = ap.parse_args()
 
-    cfg_path = Path(args.config).resolve()
+    wrapper_cfg = load_yaml(Path(args.wrapper)) if args.wrapper else None
+    if wrapper_cfg:
+        if "base_config" not in wrapper_cfg:
+            raise SystemExit("Wrapper config must specify base_config")
+        cfg_path = Path(wrapper_cfg["base_config"]).resolve()
+    elif args.config:
+        cfg_path = Path(args.config).resolve()
+    else:
+        raise SystemExit("Provide --config or --wrapper")
+
     base_cfg = load_yaml(cfg_path)
 
-    if args.ensemble_root:
-        ensemble_root = Path(args.ensemble_root).resolve()
+    # Ensemble root resolution (CLI > wrapper > default).
+    if args.mode == "slurm":
+        if args.ensemble_root:
+            ensemble_root = args.ensemble_root
+        elif wrapper_cfg and wrapper_cfg.get("io", {}).get("ensemble_root"):
+            ensemble_root = wrapper_cfg["io"]["ensemble_root"]
+        else:
+            head = _infer_head_type(base_cfg)
+            tag_raw = base_cfg.get("slurm", {}).get("job_name") or cfg_path.stem
+            tag = _prefix_job(tag_raw, head)
+            ensemble_root = str(REPO_ROOT / "outputs" / "trainings" / "ensembles" / f"{tag}_{'{ts}'}_{'{jobid}'}")
+        # do not mkdir here; worker will resolve jobid and mkdir
+    elif args.mode == "array-worker":
+        tmpl = os.environ.get("ENSEMBLE_ROOT_TEMPLATE")
+        if not tmpl:
+            raise SystemExit("array-worker mode requires ENSEMBLE_ROOT_TEMPLATE")
+        ensemble_root = _resolve_root(tmpl, cfg_path, base_cfg)
+        Path(ensemble_root).mkdir(parents=True, exist_ok=True)
     else:
-        # Default: outputs/ensembles/<job_name_or_cfgstem>_<ts>
-        tag = base_cfg.get("slurm", {}).get("job_name") or cfg_path.stem
-        ts_root = datetime.now().strftime("%Y%m%d-%H%M%S")
-        ensemble_root = (REPO_ROOT / "outputs" / "ensembles" / f"{tag}_{ts_root}").resolve()
-    ensemble_root.mkdir(parents=True, exist_ok=True)
+        if args.ensemble_root:
+            ensemble_root = _resolve_root(args.ensemble_root, cfg_path, base_cfg)
+        elif wrapper_cfg and wrapper_cfg.get("io", {}).get("ensemble_root"):
+            ensemble_root = _resolve_root(wrapper_cfg["io"]["ensemble_root"], cfg_path, base_cfg)
+        else:
+            head = _infer_head_type(base_cfg)
+            tag_raw = base_cfg.get("slurm", {}).get("job_name") or cfg_path.stem
+            tag = _prefix_job(tag_raw, head)
+            ts_root = datetime.now().strftime("%Y%m%d-%H%M%S")
+            ensemble_root = (REPO_ROOT / "outputs" / "trainings" / "ensembles" / f"{tag}_{ts_root}").resolve()
+        Path(ensemble_root).mkdir(parents=True, exist_ok=True)
 
-    ens_cfg = base_cfg.get("ensemble", {}) or {}
-    n_members = int(ens_cfg.get("n_members", 1))
+    # n_members (wrapper override > base config)
+    if wrapper_cfg and "ensemble" in wrapper_cfg and "n_members" in wrapper_cfg["ensemble"]:
+        n_members = int(wrapper_cfg["ensemble"]["n_members"])
+    else:
+        ens_cfg = base_cfg.get("ensemble", {}) or {}
+        n_members = int(ens_cfg.get("n_members", 1))
     if n_members < 1:
         raise SystemExit("ensemble.n_members must be >= 1")
 
-    # Snapshot base config
-    snapshot_path = ensemble_root / "base_config.yaml"
-    if not snapshot_path.exists():
-        save_yaml(base_cfg, snapshot_path)
+    # If running as array-worker, prefer env-provided N_MEMBERS/base_seed (exported from submit step)
+    if args.mode == "array-worker":
+        n_members_env = os.environ.get("N_MEMBERS")
+        if n_members_env:
+            n_members = int(n_members_env)
 
-    # Manifest
-    ts = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
-    _write_manifest(ensemble_root, snapshot_path, n_members, args.mode, ts)
+    # base seed (CLI > wrapper > base config)
+    if args.base_seed is not None:
+        base_seed = args.base_seed
+    elif wrapper_cfg and "ensemble" in wrapper_cfg and "base_seed" in wrapper_cfg["ensemble"]:
+        base_seed = int(wrapper_cfg["ensemble"]["base_seed"])
+    else:
+        base_seed = int(base_cfg.get("seed", 42))
 
-    base_seed = args.base_seed if args.base_seed is not None else int(base_cfg.get("seed", 42))
-
+    # Slurm submission: defer all work to array workers; no snapshot here
     if args.mode == "slurm":
         submit_slurm_array(cfg_path, ensemble_root, n_members, base_cfg)
         return
+
+    # Snapshot base config (local/array-worker)
+    snapshot_path = Path(ensemble_root) / "base_config.yaml"
+    if not snapshot_path.exists():
+        save_yaml(base_cfg, snapshot_path)
+
+    # Manifest (only write once in non-worker; in worker only if missing)
+    if args.mode != "array-worker":
+        ts = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+        _write_manifest(Path(ensemble_root), snapshot_path, n_members, args.mode, ts)
+    else:
+        manifest_path = Path(ensemble_root) / "ensemble_manifest.json"
+        if not manifest_path.exists():
+            ts = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+            _write_manifest(Path(ensemble_root), snapshot_path, n_members, args.mode, ts)
 
     if args.mode == "array-worker":
         task_id_str = os.environ.get("SLURM_ARRAY_TASK_ID")

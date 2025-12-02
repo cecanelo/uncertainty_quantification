@@ -23,6 +23,19 @@ def _load_cfg(path: str) -> Dict[str, Any]:
     with open(path, "r") as f:
         return yaml.safe_load(f)
 
+def _resolve_outdir(raw: str, cfg: Dict[str, Any]) -> Path:
+    """
+    Resolve outdir templates with placeholders:
+      {job}   -> slurm.job_name if present else cfg['model'].get('head_type','run')
+      {ts}    -> current timestamp
+      {jobid} -> SLURM_JOB_ID env if present else NA
+    """
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    jobid_env = os.environ.get("SLURM_JOB_ID", "NA")
+    job_name = cfg.get("slurm", {}).get("job_name") or cfg.get("objective") or cfg.get("head_type") or "run"
+    filled = raw.replace("{job}", str(job_name)).replace("{ts}", ts).replace("{jobid}", jobid_env)
+    return Path(filled).resolve()
+
 def _objective_name(cfg: Dict[str, Any]) -> str:
     # default objective by head_type
     head = cfg["model"].get("head_type", "point").lower()
@@ -108,7 +121,12 @@ def main():
     args = p.parse_args()
 
     cfg = _load_cfg(args.config)
-    Path(args.outdir).mkdir(parents=True, exist_ok=True)
+    # Allow templated outdir in config if --outdir is a placeholder string
+    outdir = Path(args.outdir)
+    # If the outdir still contains placeholders, resolve them using cfg
+    if "{" in args.outdir and "}" in args.outdir:
+        outdir = _resolve_outdir(args.outdir, cfg)
+    outdir.mkdir(parents=True, exist_ok=True)
     # --- Config validation: fail fast on missing required keys ---
     _require_keys(cfg, ["data", "model", "training", "objective", "io"])
 

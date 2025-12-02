@@ -49,4 +49,4 @@ nf:
   standardize: true        # use z = (y_true_t - mu_t) / scale_t
 
 io:
-  outdir: "/home/canelo/uncertainty_quantification/outputs/flows/nf_{job}_{ts}_{jobid}"
+  outdir: "/home/canelo/uncertainty_quantification/outputs/trainings/flows/nf_{job}_{ts}_{jobid}"

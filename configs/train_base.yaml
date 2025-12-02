@@ -1,4 +1,4 @@
-seed: 3
+seed: 1
 
 slurm:
     partition: "TEST"
@@ -13,7 +13,7 @@ data:
     csv_path: "/home/canelo/uncertainty_quantification/datasets/craigslist_cleaned.csv"
     target_col: "price"
     target_transform: "none"
-    split_seed: 42
+    split_seed: 1
     split_fracs: [0.7, 0.1, 0.2]
     batch_size: 2048
     num_workers: 2
@@ -49,12 +49,12 @@ training:
 
 ensemble:
     enabled: false        # set true to train an ensemble via a launcher script
-    n_members: 5          # number of ensemble members when enabled
+    n_members: 4          # number of ensemble members when enabled
 
 objective: "val_mae_orig"         # "val_mae"   "val_mae_orig"  
 
 io:
     outdir: "."
     evals_root: "outputs/evals/"
-    training_outdir: "outputs/trainings/{job_name}"
+    training_outdir: "outputs/trainings/base/{job}_{ts}_{jobid}"
 

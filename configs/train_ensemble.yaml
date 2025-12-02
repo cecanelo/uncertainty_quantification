@@ -1,0 +1,18 @@
+base_config: "/home/canelo/uncertainty_quantification/outputs/trainings/training_point_tiny/point_tiny_287109/used_config.yaml" 
+
+ensemble:
+  n_members: 3
+  base_seed: 1
+
+slurm:
+  partition: "TEST"
+  time: "01:00:00"
+  mem_gb: 30
+  cpus: 2
+  gpus: 1
+  job_name: "esm"   # will be prefixed esm_<head>_ automatically
+  conda_env: "thesis_pascal"
+  max_parallel: 4
+
+io:
+  ensemble_root: "outputs/trainings/ensembles/{job}_{ts}_{jobid}"  # {job} already prefixed esm_<head>_
