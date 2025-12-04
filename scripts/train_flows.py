@@ -346,7 +346,7 @@ def main():
     base_model_dir = Path(base_run_cfg.get("model_dir", "")) if base_run_cfg.get("model_dir") else None
     flow_created = []
 
-def _ensure_flow(split: str) -> Path:
+    def _ensure_flow(split: str) -> Path:
         key = f"{split}_csv"
         if key in base_preds_cfg:
             p = Path(base_preds_cfg[key]).resolve()

@@ -1,0 +1,56 @@
+study:
+    name: "nf_lpl_tiny"
+    storage: "sqlite:///optuna_studies/hpo.db"
+    direction: "minimize"
+    resume: true
+
+budget:
+    n_trials: 3                # small run for quick checks; increase for full HPO
+
+resources:
+    partition: "TEST"
+    time: "00:50:00"
+    mem_gb: 30
+    cpus_per_task: 2
+    gpus: 1
+    conda_env: "thesis_pascal"
+    max_parallel: 4
+
+io:
+    outputs_root: "outputs/optuna"
+    logs_root: "logs"
+    job_name_template: "{study}_{ts}"
+    trial_dir_template: "trial_{trial:05d}"
+
+base_config:
+    train_config_path: "configs/train_flows_laplace.yaml"   # swap to train_flows_gauss.yaml for Gauss runs
+    train_script_path: "scripts/train_flows.py"
+
+repro:
+    snapshot_hpo_config: true
+    snapshot_base_config: true
+    save_pip_freeze: false
+    save_git_commit: false
+
+pruner:
+    name: "median"
+    params:
+        n_startup_trials: 5
+
+search_space:
+    - { name: "training.epochs",        dist: "choice", choices: [10] }
+    - { name: "training.lr",            dist: "loguniform", low: 1.0e-4, high: 3.0e-3 }
+    - { name: "training.weight_decay",  dist: "loguniform", low: 1.0e-6, high: 1.0e-2 }
+    - { name: "training.batch_size",    dist: "choice", choices: [512, 1024] }
+    - { name: "nf.hidden_features",     dist: "choice", choices: [128, 256, 384] }
+    - { name: "nf.num_layers",          dist: "choice", choices: [4, 6, 8] }
+    - { name: "nf.transform",           dist: "choice", choices: ["affine", "spline"] }
+    - { name: "nf.num_bins",            dist: "choice", choices: [4, 8, 12] }
+    - { name: "nf.actnorm",             dist: "choice", choices: [true, false] }
+
+post_run:
+    export_best: true
+    best_dirname: "best"
+    best_filename: "best_hparams.json"
+    latest_pointer_dir: "outputs/best_hparams/{study}"
+4

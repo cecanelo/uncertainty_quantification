@@ -5,12 +5,12 @@ data:
 
 base_artifacts:
   # Path to the base Gaussian run's preproc_meta.json
-  preproc_meta_path: "/home/canelo/uncertainty_quantification/outputs/trainings/training_gauss/gauss_run/preproc_meta.json"
+  preproc_meta_path: "/home/canelo/uncertainty_quantification/outputs/trainings/training_gauss_tiny/gauss_tiny_289157/preproc_meta.json"
 
 base_run:
   # Used for auto-creating flow CSVs if they are missing
-  config_path: "/home/canelo/uncertainty_quantification/configs/train_gauss.yaml"
-  model_dir: "/home/canelo/uncertainty_quantification/outputs/trainings/training_gauss/gauss_run"
+  config_path: "/home/canelo/uncertainty_quantification/outputs/trainings/training_gauss_tiny/gauss_tiny_289157/used_config.yaml"
+  model_dir: "/home/canelo/uncertainty_quantification/outputs/trainings/training_gauss_tiny/gauss_tiny_289157"
 
 base_preds:
   # If present, use these flow CSVs; otherwise auto-create them below
@@ -24,11 +24,11 @@ flow_dumps:
 
 training:
   device: "cuda"
-  epochs: 50
+  epochs: 10
   lr: 0.0005
   weight_decay: 0.0
   batch_size: 1024
-  num_workers: 4
+  num_workers: 2
   pin_memory: true
 
 nf:
@@ -44,9 +44,9 @@ io:
 
 slurm:
   partition: "TEST"
-  time: "00:15:00"
-  mem_gb: 16
-  cpus: 4
+  time: "00:55:00"
+  mem_gb: 30
+  cpus: 2
   gpus: 1
-  job_name: "nf_gauss"
+  job_name: "nf_gau_tiny"
   conda_env: "thesis_pascal"

@@ -6,7 +6,7 @@ slurm:
     mem_gb: 30
     cpus: 4
     gpus: 1
-    job_name: "laplace_esm"
+    job_name: "laplace"
     conda_env: "thesis_pascal"
 
 data:

@@ -14,12 +14,12 @@ data:
 
 base_artifacts:
   # Path to the base Laplace run's preproc_meta.json
-  preproc_meta_path: "/home/canelo/uncertainty_quantification/outputs/trainings/training_laplace_small/laplace_small_286822/preproc_meta.json"
+  preproc_meta_path: "/home/canelo/uncertainty_quantification/outputs/trainings/training_laplace_tiny/laplace_tiny_289394/preproc_meta.json"
 
 base_run:
   # Used for auto-creating flow CSVs if they are missing
-  config_path: "/home/canelo/uncertainty_quantification/outputs/trainings/training_laplace_small/laplace_small_286822/used_config.yaml"
-  model_dir: "/home/canelo/uncertainty_quantification/outputs/trainings/training_laplace_small/laplace_small_286822"
+  config_path: "/home/canelo/uncertainty_quantification/outputs/trainings/training_laplace_tiny/laplace_tiny_289394/used_config.yaml"
+  model_dir: "/home/canelo/uncertainty_quantification/outputs/trainings/training_laplace_tiny/laplace_tiny_289394"
 
 base_preds:
   # If present, use these flow CSVs; otherwise auto-create them below

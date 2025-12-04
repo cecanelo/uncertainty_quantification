@@ -1,11 +1,11 @@
 study:
-    name: "laplace_small"
+    name: "laplace_tiny"
     storage: "sqlite:///optuna_studies/hpo.db"
     direction: "minimize"
     resume: true
 
 budget:
-    n_trials: 10                # tiny run on TEST; increase for full HPO
+    n_trials: 3                # tiny run on TEST; increase for full HPO
 
 resources:
     partition: "TEST"

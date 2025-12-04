@@ -253,10 +253,20 @@ def main() -> None:
     derived_cfg_path = best_root / "train_config_from_best.yaml"
     derived_cfg_path.write_text(yaml.safe_dump(cfg, sort_keys=False))
 
+    # Decide which trainer to call: regression vs flows vs dido
+    is_flow_cfg = "nf" in cfg and ("model" not in cfg or "objective" not in cfg)
+    is_dido_cfg = ("binning" in cfg) and ("nf" not in cfg) and ("model" not in cfg or "objective" not in cfg)
+    if is_dido_cfg:
+        trainer_script = "scripts/train_dido.py"
+    elif is_flow_cfg:
+        trainer_script = "scripts/train_flows.py"
+    else:
+        trainer_script = "scripts/train_regression.py"
+
     # --- Launch training ---
     cmd = [
         sys.executable,
-        "scripts/train_regression.py",
+        trainer_script,
         "--config",
         str(derived_cfg_path),
         "--outdir",
@@ -304,7 +314,7 @@ conda activate {conda_env}
 echo "[env] host=$(hostname) date=$(date)"
 OUTDIR="{final_outdir}"
 echo "[env] RUN_DIR=$OUTDIR"
-{sys.executable} scripts/train_regression.py --config "{derived_cfg_path}" --outdir "$OUTDIR"
+{sys.executable} {trainer_script} --config "{derived_cfg_path}" --outdir "$OUTDIR"
 """
 
         print("[train_from_best] Submitting sbatch with script:")
