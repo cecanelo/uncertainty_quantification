@@ -8,13 +8,13 @@ budget:
     n_trials: 3                # small run now; increase to 20–50 for full HPO
 
 resources:
-    partition: "TEST"          # STUD has GPUs
-    time: "00:56:00"           # increase for larger HPO runs
-    mem_gb: 30                 # STUD default per GPU
-    cpus_per_task: 2           # STUD default per GPU
-    gpus: 1                    # STUD supports 2070 GPUs
-    conda_env: "thesis_pascal" # use pascal_thesis environment on TEST
-    max_parallel: 4            # how many trials to run at once
+    partition: "STUD"          # small queue for quick runs
+    time: "10:00:00"
+    mem_gb: 32
+    cpus_per_task: 4
+    gpus: 1
+    conda_env: "thesis"
+    max_parallel: 4            # adjust down if queue is tight
 
 io:
     outputs_root: "outputs/optuna"
@@ -47,6 +47,7 @@ search_space:
     - { name: "model.dropout",         dist: "uniform", low: 0.05, high: 0.30, step: 0.05 }
     - { name: "model.activation",      dist: "choice", choices: ["relu","gelu","tanh"] }
     - { name: "data.batch_size",       dist: "choice", choices: [512, 1024] }
+    - { name: "data.target_transform", dist: "choice", choices: ["none", "log1p"] }
 
 post_run:
     export_best: true

@@ -1,13 +1,13 @@
 seed: 1
 
 slurm:
-    partition: "TEST"
-    time: "00:56:00"
-    mem_gb: 30
-    cpus: 2
+    partition: "STUD"          # small queue for quick runs
+    time: "10:00:00"
+    mem_gb: 32
+    cpus_per_task: 4
     gpus: 1
-    job_name: "point"
-    conda_env: "thesis_pascal"
+    conda_env: "thesis"
+    max_parallel: 4  
 
 data:
     csv_path: "/home/canelo/uncertainty_quantification/datasets/craigslist_cleaned.csv"
@@ -37,7 +37,7 @@ training:
 
     mc_eval:
         enabled: true      # set true to run MC-dropout eval after training
-        n_samples: 5
+        n_samples: 50
         batch_size: 512
         include_samples: true
         p_drop: null        # optional dropout override at inference

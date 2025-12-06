@@ -1,13 +1,13 @@
 seed: 1
 
 slurm:
-    partition: "TEST"
+    partition: "STUD"
     time: "00:30:00"
-    mem_gb: 30
+    mem_gb: 32
     cpus: 4
     gpus: 1
     job_name: "laplace"
-    conda_env: "thesis_pascal"
+    conda_env: "thesis"
 
 data:
     csv_path: "/home/canelo/uncertainty_quantification/datasets/craigslist_cleaned.csv"
@@ -36,8 +36,8 @@ training:
     eval_after_train: false
 
     mc_eval:
-        enabled: false      # set true to run MC-dropout eval after training
-        n_samples: 5
+        enabled: true      # set true to run MC-dropout eval after training
+        n_samples: 50
         batch_size: 512
         include_samples: true
         p_drop: null        # optional dropout override at inference
@@ -49,7 +49,7 @@ training:
 
 ensemble:
     enabled: true        # set true to train an ensemble via a launcher script
-    n_members: 3          # number of ensemble members when enabled
+    n_members: 10          # number of ensemble members when enabled
 
 objective: "val_nll"
 
