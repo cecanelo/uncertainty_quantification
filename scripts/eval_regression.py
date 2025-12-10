@@ -310,7 +310,7 @@ def main():
             scale_t = np.sqrt(2.0) * scale_t
         with flow_path.open("w", newline="") as f:
             writer = csv.writer(f)
-            writer.writerow(["id", "y_true_t", "mu_t", "scale_t", "head_type"])
+            writer.writerow(["id", "y_true_t_raw", "mu_t_raw", "scale_t_raw", "head_type"])
             for rid, y_t_i, mu_t_i, s_t_i in zip(idx, yt_concat, mu_concat, scale_t):
                 writer.writerow([int(rid), float(y_t_i), float(mu_t_i), float(s_t_i), head_type])
         print(f"[eval] Saved flow preds to: {flow_path}")

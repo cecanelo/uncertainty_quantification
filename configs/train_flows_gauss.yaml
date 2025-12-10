@@ -1,16 +1,24 @@
 seed: 1
 
+slurm:
+  partition: "STUD"
+  time: "00:55:00"
+  mem_gb: 32
+  cpus: 4
+  gpus: 1
+  job_name: "nf_gau"
+  conda_env: "thesis"
 data:
   csv_path: "/home/canelo/uncertainty_quantification/datasets/craigslist_cleaned.csv"
 
 base_artifacts:
   # Path to the base Gaussian run's preproc_meta.json
-  preproc_meta_path: "/home/canelo/uncertainty_quantification/outputs/trainings/training_gauss_tiny/gauss_tiny_289157/preproc_meta.json"
+  preproc_meta_path: "/home/canelo/uncertainty_quantification/outputs/trainings/training_gauss_50t_100e/gauss_50t_100e_290926/preproc_meta.json"
 
 base_run:
   # Used for auto-creating flow CSVs if they are missing
-  config_path: "/home/canelo/uncertainty_quantification/outputs/trainings/training_gauss_tiny/gauss_tiny_289157/used_config.yaml"
-  model_dir: "/home/canelo/uncertainty_quantification/outputs/trainings/training_gauss_tiny/gauss_tiny_289157"
+  config_path: "/home/canelo/uncertainty_quantification/outputs/trainings/training_gauss_50t_100e/gauss_50t_100e_290926/used_config.yaml"
+  model_dir: "/home/canelo/uncertainty_quantification/outputs/trainings/training_gauss_50t_100e/gauss_50t_100e_290926/"
 
 base_preds:
   # If present, use these flow CSVs; otherwise auto-create them below
@@ -24,7 +32,7 @@ flow_dumps:
 
 training:
   device: "cuda"
-  epochs: 10
+  epochs: 100
   lr: 0.0005
   weight_decay: 0.0
   batch_size: 1024
@@ -41,12 +49,8 @@ nf:
 
 io:
   outdir: "/home/canelo/uncertainty_quantification/outputs/trainings/flows/nf_{job}_{ts}_{jobid}"
+  evals_root: "outputs/evals"
 
-slurm:
-  partition: "TEST"
-  time: "00:55:00"
-  mem_gb: 30
-  cpus: 2
-  gpus: 1
-  job_name: "nf_gau_tiny"
-  conda_env: "thesis_pascal"
+evaluation:
+  after_train: true
+  splits: ["test"]

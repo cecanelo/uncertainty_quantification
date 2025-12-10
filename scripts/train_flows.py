@@ -186,9 +186,19 @@ def _build_features_from_meta(csv_path: Path, meta: dict) -> Tuple[np.ndarray, n
 
 def _read_preds(path: Path) -> pd.DataFrame:
     df = pd.read_csv(path)
-    required = {"y_true_t", "mu_t", "scale_t"}
-    if not required.issubset(df.columns):
-        raise ValueError(f"{path} must include columns {required} plus an id/row_idx column.")
+    # Support new *_raw names but stay compatible with previous dumps
+    col_sets = [
+        ("y_true_t_raw", "mu_t_raw", "scale_t_raw"),
+        ("y_true_t", "mu_t", "scale_t"),
+    ]
+    cols = None
+    for cand in col_sets:
+        if set(cand).issubset(df.columns):
+            cols = cand
+            break
+    if cols is None:
+        raise ValueError(f"{path} must include y_true_t_raw/mu_t_raw/scale_t_raw (or legacy y_true_t/mu_t/scale_t) plus an id/row_idx column.")
+    df = df.rename(columns={cols[0]: "y_true_t_raw", cols[1]: "mu_t_raw", cols[2]: "scale_t_raw"})
     if "id" not in df.columns and "row_idx" not in df.columns:
         raise ValueError(f"{path} must include 'id' or 'row_idx' column.")
     return df
@@ -204,9 +214,9 @@ def _build_split_tensors(X_all: np.ndarray,
     idx_col = "id" if "id" in df_preds.columns else "row_idx"
     idx = df_preds[idx_col].astype(int).to_numpy()
 
-    y_true_t = df_preds["y_true_t"].to_numpy()
-    mu_t = df_preds["mu_t"].to_numpy()
-    scale_t = df_preds["scale_t"].to_numpy()
+    y_true_t = df_preds["y_true_t_raw"].to_numpy()
+    mu_t = df_preds["mu_t_raw"].to_numpy()
+    scale_t = df_preds["scale_t_raw"].to_numpy()
 
     z = y_true_t - mu_t
     if standardize:
@@ -230,7 +240,7 @@ def submit_slurm(cfg_path: Path, outdir_raw: str, cfg: dict) -> None:
     conda_env = slurm_cfg.get("conda_env", "thesis")
     job_name = slurm_cfg.get("job_name", "train_flows")
 
-    logs_root = (REPO_ROOT / "logs").resolve()
+    logs_root = (REPO_ROOT / "logs" / "train").resolve()
     logs_root.mkdir(parents=True, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
     out_log = logs_root / f"{job_name}_{ts}_%j.out"
@@ -285,7 +295,8 @@ def main():
     ap.add_argument("--mode", choices=["local", "slurm"], default="local", help="local or slurm submission")
     args = ap.parse_args()
 
-    cfg = _load_cfg(args.config)
+    cfg_path = Path(args.config).resolve()
+    cfg = _load_cfg(cfg_path)
     cfg_outdir = cfg.get("io", {}).get("outdir")
 
     def _resolve_outdir(raw: str) -> Path:
@@ -468,6 +479,35 @@ def main():
             f, indent=4,
         )
 
+    # Optional eval-after-train hook (writes under evals_root/run_tag)
+    evaluation_meta = {"after_train": False}
+    eval_cfg = cfg.get("evaluation", {}) or {}
+    if eval_cfg.get("after_train", False):
+        eval_splits = eval_cfg.get("splits", ["test"])
+        if isinstance(eval_splits, str):
+            eval_splits = [eval_splits]
+        evals_root = eval_cfg.get("evals_root", cfg.get("io", {}).get("evals_root", "outputs/evals"))
+        run_tag = outdir.name
+        save_dir = Path(evals_root) / run_tag
+        evaluation_meta = {"after_train": True, "splits": list(eval_splits), "save_dir": str(save_dir)}
+        for split in eval_splits:
+            print(f"[nf-aleatoric] Running eval_flows.py for split '{split}'")
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(REPO_ROOT / "scripts" / "eval_flows.py"),
+                    "--config",
+                    str(cfg_path),
+                    "--outdir",
+                    str(outdir),
+                    "--split",
+                    str(split),
+                    "--save-dir",
+                    str(save_dir),
+                ],
+                check=True,
+            )
+
     # Keep the exact config used + quick run meta
     _save_yaml(cfg, outdir / "used_config.yaml")
     duration_sec = time.perf_counter() - start_time
@@ -505,6 +545,7 @@ def main():
             "duration_sec": float(duration_sec),
             "duration_hms": duration_hms,
         },
+        "evaluation": evaluation_meta,
     }
     with open(outdir / "run_meta.json", "w") as f:
         json.dump(run_meta, f, indent=4)

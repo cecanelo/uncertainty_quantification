@@ -22,6 +22,7 @@ import argparse
 import datetime as dt
 import json
 import os
+import re
 from pathlib import Path
 from typing import Dict, Optional
 import glob
@@ -38,6 +39,52 @@ def save_json(obj: dict, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w") as f:
         json.dump(obj, f, indent=4)
+
+def _find_job_root_via_logs(job_id: str, io_cfg: dict) -> Optional[Path]:
+    """
+    Try to infer the HPO job root from log filenames that contain the JOBID.
+    Looks for patterns like hpo-<job_tag>_<JOBID>_<task>.out/err and maps
+    job_tag -> outputs_root/job_tag.
+    """
+    logs_root = Path(io_cfg.get("logs_root", "logs")).resolve()
+    outputs_root = Path(io_cfg.get("outputs_root", "outputs/optuna")).resolve()
+    if not logs_root.exists():
+        return None
+
+    pat = re.compile(r"^(?:hpo-)?(?P<tag>.+?)_" + re.escape(str(job_id)) + r"(?:_|\.|$)")
+
+    try:
+        candidates = sorted(logs_root.rglob(f"*{job_id}*"), key=lambda p: p.stat().st_mtime, reverse=True)
+    except Exception:
+        candidates = []
+
+    for p in candidates:
+        for nm in (p.name, p.parent.name):
+            m = pat.match(nm)
+            if not m:
+                continue
+            job_tag = m.group("tag")
+            candidate = outputs_root / job_tag
+            if candidate.exists():
+                exp = candidate / "expected_job_root.txt"
+                if exp.exists():
+                    try:
+                        txt = exp.read_text().strip()
+                        if txt:
+                            candidate = Path(txt)
+                    except Exception:
+                        pass
+                return candidate
+    return None
+
+def _deep_merge(base: dict, patch: dict) -> dict:
+    out = dict(base)
+    for k, v in (patch or {}).items():
+        if isinstance(v, dict) and isinstance(out.get(k), dict):
+            out[k] = _deep_merge(out[k], v)
+        else:
+            out[k] = v
+    return out
 
 
 # REPLACE this function in scripts/hpo_export_best.py
@@ -151,10 +198,15 @@ def main() -> None:
                         break
                 except Exception:
                     pass
+            # Extra fallback: infer from log filenames containing JOBID
+            if not job_root_arg:
+                via_logs = _find_job_root_via_logs(args.job_id, io_cfg)
+                if via_logs:
+                    job_root_arg = str(via_logs.resolve())
             if not job_root_arg:
                 raise SystemExit(
                     f"Could not find job root for JOBID={args.job_id}. "
-                    f"Looked for {base}/{pattern} and via jobid.txt scan."
+                    f"Looked for {base}/{pattern}, via jobid.txt scan, and logs."
                 )
 
     if not job_root_arg:
@@ -220,6 +272,38 @@ def main() -> None:
 
     if export_best:
         out1 = job_root / best_dirname / best_filename
+
+        # Build a ready-to-run train config for the best trial (mirrors train_from_best.py defaults)
+        best_cfg_filename = post.get("best_config_filename", "train_config_from_best.yaml")
+        best_cfg_path = None
+        try:
+            if trial_dir and (trial_dir / "train_config_merged.yaml").exists():
+                merged_cfg = load_yaml(str(trial_dir / "train_config_merged.yaml"))
+                # Overlay optional post_run.train_overrides (schema matches train config)
+                merged_cfg = _deep_merge(merged_cfg, post.get("train_overrides", {}))
+
+                # Re-apply best params defensively (merged config should already contain them)
+                for full_key, val in (payload.get("params", {}) or {}).items():
+                    if "." not in full_key:
+                        continue
+                    section, key = full_key.split(".", 1)
+                    merged_cfg.setdefault(section, {})
+                    if isinstance(merged_cfg.get(section), dict):
+                        merged_cfg[section][key] = val
+
+                train_cfg = merged_cfg.get("training", {}) or {}
+                train_cfg.setdefault("eval_after_train", True)
+                merged_cfg["training"] = train_cfg
+
+                best_cfg_path = out1.parent / best_cfg_filename
+                best_cfg_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(best_cfg_path, "w") as f:
+                    yaml.safe_dump(merged_cfg, f, sort_keys=False)
+                payload.setdefault("artifacts", {})
+                payload["artifacts"]["train_config"] = str(best_cfg_path)
+        except Exception as e:
+            print(f"[export] Warning: failed to write best train config: {e}")
+
         save_json(payload, out1)
 
         latest_dir_template = post.get("latest_pointer_dir", "")

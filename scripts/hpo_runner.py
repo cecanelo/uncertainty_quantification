@@ -104,7 +104,8 @@ def main() -> None:
         raise SystemExit("hpo_config.yaml: budget.n_trials must be a positive integer for array-based HPO.")
 
     # --- Naming and folders ---
-    ts = dt.datetime.now().strftime("%Y%m%d-%H%M")
+    # Include seconds so consecutive HPO launches don't collide
+    ts = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
     job_tag = io_cfg["job_name_template"].format(study=study["name"], ts=ts, jobid="NA")
     
 

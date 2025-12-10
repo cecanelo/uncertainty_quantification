@@ -1,8 +1,20 @@
-base_config: "/home/canelo/uncertainty_quantification/outputs/trainings/training_laplace_tiny/laplace_tiny_289394/used_config.yaml" 
+base_config: "/home/canelo/uncertainty_quantification/outputs/trainings/training_lpl_xs/lpl_xs_20251210-003101_291821/used_config.yaml" 
 
 ensemble:
   n_members: 3
   base_seed: 1
+
+member_overrides:
+  training:
+    eval_after_train: true
+    mc_eval:
+      enabled: false         # toggle MC-dropout for ensemble members here
+      n_samples: 50         # adjust per ensemble without touching base config
+      include_samples: true
+      batch_size: 512
+
+run:
+  mode: "slurm"
 
 slurm:
   partition: "TEST"
@@ -16,3 +28,4 @@ slurm:
 
 io:
   ensemble_root: "outputs/trainings/ensembles/{job}_{ts}_{jobid}"  # {job} already prefixed esm_<head>_
+  evals_root: "outputs/evals/{ensemble}"

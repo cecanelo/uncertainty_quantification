@@ -26,6 +26,7 @@ import argparse
 import json
 import subprocess
 import sys
+import re
 from pathlib import Path
 from datetime import datetime
 
@@ -39,8 +40,20 @@ def main() -> None:
     parser.add_argument(
         "--best-root",
         type=str,
-        required=True,
+        required=False,
         help="Folder that contains best_hparams.json (e.g. outputs/optuna/<study>/best)",
+    )
+    parser.add_argument(
+        "--job-id",
+        type=str,
+        default=None,
+        help="Optional SLURM JOBID to locate the HPO job automatically (requires --hpo-config).",
+    )
+    parser.add_argument(
+        "--hpo-config",
+        type=str,
+        default=None,
+        help="HPO config used for the run (needed to resolve job-id when --best-root is omitted).",
     )
     parser.add_argument(
         "--mode",
@@ -59,7 +72,11 @@ def main() -> None:
     )
     parser.add_argument(
         "--fresh-outdir", action="store_true",
-        help="If set, always create a timestamped training/evals outdir to avoid overwrites."
+        help="Create a timestamped training/evals outdir to avoid overwrites (default: True)."
+    )
+    parser.add_argument(
+        "--no-fresh-outdir", dest="fresh_outdir", action="store_false",
+        help="Reuse the core tag (no timestamp) for training/evals outdir."
     )
     parser.add_argument(
         "--partition",
@@ -115,10 +132,70 @@ def main() -> None:
         help="Override training.epochs in the merged config (run longer than HPO).",
     )
 
+    parser.set_defaults(fresh_outdir=True)
+
     args = parser.parse_args()
 
+    def _find_job_root_from_logs(job_id: str, io_cfg: dict) -> Path | None:
+        logs_root = Path(io_cfg.get("logs_root", "logs")).resolve()
+        outputs_root = Path(io_cfg.get("outputs_root", "outputs/optuna")).resolve()
+        pat = re.compile(r"^(?:hpo-)?(?P<tag>.+?)_" + re.escape(str(job_id)) + r"(?:_|\.|$)")
+        if not logs_root.exists():
+            return None
+        try:
+            candidates = sorted(logs_root.rglob(f"*{job_id}*"), key=lambda p: p.stat().st_mtime, reverse=True)
+        except Exception:
+            candidates = []
+        for p in candidates:
+            for nm in (p.name, p.parent.name):
+                m = pat.match(nm)
+                if not m:
+                    continue
+                tag = m.group("tag")
+                candidate = outputs_root / tag
+                if candidate.exists():
+                    exp = candidate / "expected_job_root.txt"
+                    if exp.exists():
+                        try:
+                            txt = exp.read_text().strip()
+                            if txt:
+                                candidate = Path(txt)
+                        except Exception:
+                            pass
+                    return candidate
+        return None
 
-    best_root = Path(args.best_root).resolve()
+    best_root = None
+    if args.best_root:
+        best_root = Path(args.best_root).resolve()
+    elif args.job_id:
+        if not args.hpo_config:
+            raise SystemExit("--job-id requires --hpo-config to resolve outputs_root/logs_root")
+        hpo_cfg = yaml.safe_load(Path(args.hpo_config).read_text())
+        io_cfg = hpo_cfg.get("io", {}) or {}
+        outputs_root = Path(io_cfg.get("outputs_root", "outputs/optuna")).resolve()
+        study = hpo_cfg.get("study", {}).get("name", "")
+        pattern = f"{study}_*_{args.job_id}*"
+        candidates = sorted(outputs_root.glob(pattern), key=lambda p: p.stat().st_mtime, reverse=True)
+        if candidates:
+            best_root = candidates[0] / "best"
+            exp = candidates[0] / "expected_job_root.txt"
+            if exp.exists():
+                try:
+                    txt = exp.read_text().strip()
+                    if txt:
+                        best_root = Path(txt) / "best"
+                except Exception:
+                    pass
+        if best_root is None:
+            via_logs = _find_job_root_from_logs(str(args.job_id), io_cfg)
+            if via_logs:
+                best_root = via_logs.resolve() / "best"
+        if best_root is None:
+            raise SystemExit(f"Could not resolve best-root for JOBID={args.job_id}")
+    else:
+        raise SystemExit("Provide --best-root or --job-id (with --hpo-config)")
+
     best_json = best_root / "best_hparams.json"
     if not best_json.is_file():
         raise SystemExit(f"best_hparams.json not found at {best_json}")
@@ -144,29 +221,31 @@ def main() -> None:
 
 
 
-    cfg_path = trial_dir / "train_config_merged.yaml"
-    if not cfg_path.is_file():
-        raise SystemExit(f"train_config_merged.yaml not found at {cfg_path}")
+    exported_cfg_path = best_root / "train_config_from_best.yaml"
+    merged_cfg_path = trial_dir / "train_config_merged.yaml"
 
-    # --- Load and tweak config in memory ---
-    cfg = yaml.safe_load(cfg_path.read_text())
+    # --- Load base config ---
+    if exported_cfg_path.is_file():
+        cfg = yaml.safe_load(exported_cfg_path.read_text())
+        print(f"[train_from_best] Using exported config: {exported_cfg_path}")
+        best_params_applied = True
+    else:
+        if not merged_cfg_path.is_file():
+            raise SystemExit(f"train_config_merged.yaml not found at {merged_cfg_path}")
+        cfg = yaml.safe_load(merged_cfg_path.read_text())
+        best_params_applied = False
 
-    # --- Overlay best trial hyperparameters from best_hparams.json ---
-    # payload["params"] contains keys like "training.lr", "model.hidden_dims", etc.
-    best_params = payload.get("params", {}) or {}
-
-    for full_key, val in best_params.items():
-        # full_key examples: "training.lr", "model.hidden_dims"
-        if "." not in full_key:
-            continue
-        section, key = full_key.split(".", 1)
-
-        # If user overrides epochs via CLI, let CLI win later
-        if section == "training" and key == "epochs" and args.epochs is not None:
-            continue
-
-        cfg.setdefault(section, {})
-        cfg[section][key] = val
+    # --- Overlay best trial hyperparameters if not already baked in ---
+    if not best_params_applied:
+        best_params = payload.get("params", {}) or {}
+        for full_key, val in best_params.items():
+            if "." not in full_key:
+                continue
+            section, key = full_key.split(".", 1)
+            if section == "training" and key == "epochs" and args.epochs is not None:
+                continue
+            cfg.setdefault(section, {})
+            cfg[section][key] = val
 
     # --- Optional: override number of epochs from CLI ---
     if args.epochs is not None:
@@ -249,8 +328,8 @@ def main() -> None:
     # if training_outdir_cfg:
     #     training_outdir = Path(training_outdir_cfg).resolve()
 
-    # Write derived config next to best_hparams.json
-    derived_cfg_path = best_root / "train_config_from_best.yaml"
+    # Write the exact config that will be used for training
+    derived_cfg_path = best_root / "train_config_to_use.yaml"
     derived_cfg_path.write_text(yaml.safe_dump(cfg, sort_keys=False))
 
     # Decide which trainer to call: regression vs flows vs dido
@@ -273,7 +352,7 @@ def main() -> None:
         str(final_outdir),
     ]
 
-    print(f"[train_from_best] Using best config from: {cfg_path}")
+    print(f"[train_from_best] Using best config from: {derived_cfg_path}")
     print(f"[train_from_best] Training outdir: {final_outdir}")
     print(f"[train_from_best] Evals will be under: {cfg['io']['evals_root']}/{Path(final_outdir).name}")
 
@@ -284,7 +363,7 @@ def main() -> None:
     else:
         # Submit as a SLURM job
         repo_root = Path(__file__).resolve().parents[1]
-        logs_dir = repo_root / "logs"
+        logs_dir = repo_root / "logs" / "train"
         logs_dir.mkdir(parents=True, exist_ok=True)
 
         # Log filenames: training_<job_name>_<timestamp>_<JOBID>.{out,err}

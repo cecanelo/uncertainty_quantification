@@ -36,7 +36,7 @@ training:
     eval_after_train: false
 
     mc_eval:
-        enabled: true      # set true to run MC-dropout eval after training
+        enabled: false      # set true to run MC-dropout eval after training
         n_samples: 50
         batch_size: 512
         include_samples: true
@@ -49,7 +49,7 @@ training:
 
 ensemble:
     enabled: false        # set true to train an ensemble via a launcher script
-    n_members: 4          # number of ensemble members when enabled
+    n_members: 10          # number of ensemble members when enabled
 
 objective: "val_mae_orig"         # "val_mae"   "val_mae_orig"  
 

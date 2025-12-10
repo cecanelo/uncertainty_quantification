@@ -28,7 +28,7 @@ model:
 
 training:
     device: "cuda"
-    epochs: 5
+    epochs: 100
     lr: 0.001
     weight_decay: 0.0
     grad_clip: 0.0
@@ -37,7 +37,7 @@ training:
 
     mc_eval:
         enabled: true      # set true to run MC-dropout eval after training
-        n_samples: 5
+        n_samples: 50
         batch_size: 512
         include_samples: true
         p_drop: null        # optional dropout override at inference
@@ -48,13 +48,12 @@ training:
         min_delta: 0.0
 
 ensemble:
-    enabled: false        # set true to train an ensemble via a launcher script
-    n_members: 5          # number of ensemble members when enabled
+    enabled: true        # set true to train an ensemble via a launcher script
+    n_members: 10          # number of ensemble members when enabled
 
-objective: "val_nll"         
+objective: "val_nll"
 
 io:
     outdir: "."
     evals_root: "outputs/evals/"
     training_outdir: "outputs/trainings/gauss/{job}_{ts}_{jobid}"
-

@@ -201,14 +201,27 @@ def main() -> None:
 
     df_flow = pd.read_csv(flow_csv)
     idx_col = "id" if "id" in df_flow.columns else "row_idx"
-    required = {idx_col, "y_true_t", "mu_t", "scale_t", "head_type"}
-    if not required.issubset(df_flow.columns):
-        raise ValueError(f"{flow_csv} missing required columns {required}")
+
+    # Accept new *_raw columns, fall back to legacy names
+    col_sets = [
+        ("y_true_t_raw", "mu_t_raw", "scale_t_raw"),
+        ("y_true_t", "mu_t", "scale_t"),
+    ]
+    cols = None
+    for cand in col_sets:
+        required = {idx_col, *cand, "head_type"}
+        if set(required).issubset(df_flow.columns):
+            cols = cand
+            break
+    if cols is None:
+        raise ValueError(f"{flow_csv} missing required columns (id/row_idx + *_raw + head_type)")
+
+    df_flow = df_flow.rename(columns={cols[0]: "y_true_t_raw", cols[1]: "mu_t_raw", cols[2]: "scale_t_raw"})
 
     idx = df_flow[idx_col].astype(int).to_numpy()
-    y_true_t = df_flow["y_true_t"].to_numpy()
-    mu_t = df_flow["mu_t"].to_numpy()
-    scale_t = df_flow["scale_t"].to_numpy()
+    y_true_t = df_flow["y_true_t_raw"].to_numpy()
+    mu_t = df_flow["mu_t_raw"].to_numpy()
+    scale_t = df_flow["scale_t_raw"].to_numpy()
     head_type = str(df_flow["head_type"].iloc[0]).lower()
 
     z = (y_true_t - mu_t) / np.maximum(scale_t, 1e-8)
@@ -255,8 +268,8 @@ def main() -> None:
             "y_true_orig",
             "y_pred_base_orig",
             "sigma_base_orig",
-            "z",
-            "log_prob_z",
+            "z_raw",
+            "log_prob_z_raw",
         ])
         for rid, yt_o, mu_o, sig_o, z_i, lp in zip(idx, y_true_orig, mu_orig, sigma_ale_orig, z, log_prob_np):
             writer.writerow([

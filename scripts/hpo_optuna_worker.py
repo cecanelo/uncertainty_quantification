@@ -273,6 +273,11 @@ def main() -> None:
             "conda_env": resources_cfg.get("conda_env", "thesis"),
         }
 
+        # Optional: force per-trial settings (e.g., eval_after_train) directly from HPO config
+        trial_overrides = cfg.get("trial_overrides", {}) or {}
+        if trial_overrides:
+            merged = deep_update(merged, trial_overrides)
+
         save_yaml(merged, str(trial_dir / "train_config_merged.yaml"))
 
         # Keep HPO metadata separate so train.py cannot overwrite it

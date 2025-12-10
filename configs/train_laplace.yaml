@@ -28,11 +28,11 @@ model:
 
 training:
     device: "cuda"
-    epochs: 10
+    epochs: 100
     lr: 0.001
     weight_decay: 0.0
     grad_clip: 0.0
-    point_loss: "huber"
+    point_loss: "huber"   # mae|mse|huber
     eval_after_train: false
 
     mc_eval:

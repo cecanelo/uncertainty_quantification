@@ -225,8 +225,8 @@ def _write_unified_csv(
         "y_true",
         "y_pred_det",
         "y_pred_mc_mean",
-        "sigma_ale_raw",
-        "sigma_epi_raw",
+        "sigma_ale_orig",
+        "sigma_epi_orig",
     ]
     if include_samples and mc_samples_orig is not None:
         header.extend([f"y_pred_mc_{i}" for i in range(1, mc_samples_orig.shape[0] + 1)])

@@ -1,30 +1,34 @@
 study:
-    name: "dido_tiny"
+    name: "dido_50t_100e"
     storage: "sqlite:///optuna_studies/hpo.db"
     direction: "minimize"
     resume: true
 
 budget:
-    n_trials: 3                # small run; increase for full HPO
+    n_trials: 50                # small run; increase for full HPO
 
 resources:
-    partition: "TEST"
-    time: "00:40:00"
-    mem_gb: 30
-    cpus_per_task: 2
+    partition: "STUD"
+    time: "00:50:00"
+    mem_gb: 48
+    cpus_per_task: 4
     gpus: 1                    # CPU is fine for small DIDO; set to 1 if you prefer GPU
-    conda_env: "thesis_pascal"
+    conda_env: "thesis"
     max_parallel: 4
 
 io:
     outputs_root: "outputs/optuna"
-    logs_root: "logs"
+    logs_root: "logs/hpo"
     job_name_template: "{study}_{ts}"
     trial_dir_template: "trial_{trial:05d}"
 
 base_config:
     train_config_path: "configs/train_dido.yaml"
     train_script_path: "scripts/train_dido.py"
+
+trial_overrides:
+    training:
+        eval_after_train: false
 
 repro:
     snapshot_hpo_config: true
@@ -35,10 +39,10 @@ repro:
 pruner:
     name: "median"
     params:
-        n_startup_trials: 2
+        n_startup_trials: 15
 
 search_space:
-    - { name: "training.epochs",            dist: "choice", choices: [5] }
+    - { name: "training.epochs",            dist: "choice", choices: [100] }
     - { name: "binning.use_abs_error",      dist: "choice", choices: [true, false] }
     - { name: "binning.include_mu_as_feature", dist: "choice", choices: [true, false] }
     - { name: "model.hidden_dims",          dist: "choice", choices: [[128, 64], [256, 128], [256, 128, 64]] }
@@ -51,4 +55,8 @@ post_run:
     export_best: true
     best_dirname: "best"
     best_filename: "best_hparams.json"
+    best_config_filename: "train_config_from_best.yaml"
+    train_overrides:
+        training:
+            eval_after_train: true
     latest_pointer_dir: "outputs/best_hparams/{study}"

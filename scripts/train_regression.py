@@ -631,9 +631,9 @@ def main():
                     id_header = "row_index"
 
                 if split_scales_all is not None:
-                    header = [id_header, "y_true", "y_pred", "y_scale"]
+                    header = [id_header, "split", "head_type", "y_true", "y_pred", "y_scale"]
                 else:
-                    header = [id_header, "y_true", "y_pred"]
+                    header = [id_header, "split", "head_type", "y_true", "y_pred"]
 
                 out_path = eval_dir / csv_name
                 with open(out_path, "w", newline="") as f:
@@ -641,10 +641,10 @@ def main():
                     writer.writerow(header)
                     if split_scales_all is not None:
                         for key, yt_i, mu_i, s_i in zip(first_col, yt_o, mu_o, split_scales_all):
-                            writer.writerow([key, float(yt_i), float(mu_i), float(s_i)])
+                            writer.writerow([key, split_key, head_type, float(yt_i), float(mu_i), float(s_i)])
                     else:
                         for key, yt_i, mu_i in zip(first_col, yt_o, mu_o):
-                            writer.writerow([key, float(yt_i), float(mu_i)])
+                            writer.writerow([key, split_key, head_type, float(yt_i), float(mu_i)])
 
                 print(f"[eval-after-train] Saved {split_name} predictions to: {out_path}")
 
@@ -742,9 +742,9 @@ def main():
             id_header = "row_index"
 
         if te_scales_all is not None:
-            header = [id_header, "y_true", "y_pred", "y_scale"]
+            header = [id_header, "split", "head_type", "y_true", "y_pred", "y_scale"]
         else:
-            header = [id_header, "y_true", "y_pred"]
+            header = [id_header, "split", "head_type", "y_true", "y_pred"]
 
         # Save per-instance predictions (original target scale) with ID/row_index
         # If MC eval is enabled, skip the deterministic test CSV to avoid duplication
@@ -754,10 +754,10 @@ def main():
                 writer.writerow(header)
                 if te_scales_all is not None:
                     for key, yt_i, mu_i, s_i in zip(first_col, yt_o, mu_o, te_scales_all):
-                        writer.writerow([key, float(yt_i), float(mu_i), float(s_i)])
+                        writer.writerow([key, "test", head_type, float(yt_i), float(mu_i), float(s_i)])
                 else:
                     for key, yt_i, mu_i in zip(first_col, yt_o, mu_o):
-                        writer.writerow([key, float(yt_i), float(mu_i)])
+                        writer.writerow([key, "test", head_type, float(yt_i), float(mu_i)])
 
             print(f"[eval-after-train] Saved test predictions to: {eval_dir / 'test_preds.csv'}")
 
@@ -866,8 +866,8 @@ def main():
                     "y_true",
                     "y_pred_det",
                     "y_pred_mc_mean",
-                    "sigma_ale_raw",
-                    "sigma_epi_raw",
+                    "sigma_ale_orig",
+                    "sigma_epi_orig",
                 ]
                 if include_samples:
                     header.extend([f"y_pred_mc_{i}" for i in range(1, n_samples + 1)])

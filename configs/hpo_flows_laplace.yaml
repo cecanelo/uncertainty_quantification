@@ -1,30 +1,34 @@
 study:
-    name: "nf_lpl_tiny"
+    name: "nf_lpl_50t_100e"
     storage: "sqlite:///optuna_studies/hpo.db"
     direction: "minimize"
     resume: true
 
 budget:
-    n_trials: 3                # small run for quick checks; increase for full HPO
+    n_trials: 50                # small run for quick checks; increase for full HPO
 
 resources:
-    partition: "TEST"
+    partition: "STUD"
     time: "00:50:00"
     mem_gb: 30
-    cpus_per_task: 2
+    cpus_per_task: 4
     gpus: 1
-    conda_env: "thesis_pascal"
+    conda_env: "thesis"
     max_parallel: 4
 
 io:
     outputs_root: "outputs/optuna"
-    logs_root: "logs"
+    logs_root: "logs/hpo"
     job_name_template: "{study}_{ts}"
     trial_dir_template: "trial_{trial:05d}"
 
 base_config:
     train_config_path: "configs/train_flows_laplace.yaml"   # swap to train_flows_gauss.yaml for Gauss runs
     train_script_path: "scripts/train_flows.py"
+
+trial_overrides:
+    evaluation:
+        after_train: false
 
 repro:
     snapshot_hpo_config: true
@@ -35,10 +39,10 @@ repro:
 pruner:
     name: "median"
     params:
-        n_startup_trials: 5
+        n_startup_trials: 15
 
 search_space:
-    - { name: "training.epochs",        dist: "choice", choices: [10] }
+    - { name: "training.epochs",        dist: "choice", choices: [100] }
     - { name: "training.lr",            dist: "loguniform", low: 1.0e-4, high: 3.0e-3 }
     - { name: "training.weight_decay",  dist: "loguniform", low: 1.0e-6, high: 1.0e-2 }
     - { name: "training.batch_size",    dist: "choice", choices: [512, 1024] }
@@ -52,5 +56,9 @@ post_run:
     export_best: true
     best_dirname: "best"
     best_filename: "best_hparams.json"
+    best_config_filename: "train_config_from_best.yaml"
+    train_overrides:
+        evaluation:
+            after_train: true
+            splits: ["test"]
     latest_pointer_dir: "outputs/best_hparams/{study}"
-4

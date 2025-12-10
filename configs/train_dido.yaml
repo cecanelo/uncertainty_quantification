@@ -1,16 +1,25 @@
 seed: 1
 
+slurm:
+  partition: "STUD"
+  time: "01:00:00"
+  mem_gb: 48
+  cpus: 4
+  gpus: 1
+  job_name: "dido_lpl"
+  conda_env: "thesis"
+
 data:
   csv_path: "/home/canelo/uncertainty_quantification/datasets/craigslist_cleaned.csv"
 
 base_artifacts:
   # Path to the base run's preproc_meta.json
-  preproc_meta_path: "/home/canelo/uncertainty_quantification/outputs/trainings/training_laplace_tiny/laplace_tiny_289394/preproc_meta.json"
+  preproc_meta_path: "/home/canelo/uncertainty_quantification/outputs/trainings/training_laplace_50t_100e/laplace_50t_100e_290895/preproc_meta.json"
 
 base_run:
   # Used for auto-creating base preds if they are missing
-  config_path: "/home/canelo/uncertainty_quantification/outputs/trainings/training_laplace_tiny/laplace_tiny_289394/used_config.yaml"
-  model_dir: "/home/canelo/uncertainty_quantification/outputs/trainings/training_laplace_tiny/laplace_tiny_289394"
+  config_path: "/home/canelo/uncertainty_quantification/outputs/trainings/training_laplace_50t_100e/laplace_50t_100e_290895/used_config.yaml"
+  model_dir: "/home/canelo/uncertainty_quantification/outputs/trainings/training_laplace_50t_100e/laplace_50t_100e_290895"
 
 base_preds:
   # If present, use these; otherwise auto-create them below
@@ -30,23 +39,15 @@ model:
 
 training:
   device: "cuda"
-  epochs: 20
+  epochs: 100
   lr: 0.001
   weight_decay: 0.0
   batch_size: 1024
   num_workers: 2
   pin_memory: true
-  patience: 5
+  patience: 15
   eval_after_train: false
-
-slurm:
-  partition: "TEST"
-  time: "01:00:00"
-  mem_gb: 30
-  cpus: 2
-  gpus: 1
-  job_name: "dido_lpl_tiny"
-  conda_env: "thesis_pascal"
 
 io:
   outdir: "/home/canelo/uncertainty_quantification/outputs/trainings/{job}_{ts}_{jobid}"
+  evals_root: "outputs/evals"

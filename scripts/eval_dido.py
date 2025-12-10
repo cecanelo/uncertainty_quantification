@@ -183,17 +183,58 @@ def main() -> None:
     meta = _load_preproc_meta(base_meta_path)
     X_all, _ = _build_features_from_meta(Path(cfg["data"]["csv_path"]).resolve(), meta)
 
+    # Build mapping from external IDs to row indices so that we can safely
+    # index into X_all even when IDs are not 0..N-1.
+    id_to_row_index = None
+    if "id_values" in meta:
+        id_values = np.asarray(meta["id_values"], dtype=int)
+        id_to_row_index = {int(v): int(i) for i, v in enumerate(id_values)}
+
     preds_path = _ensure_preds(args.split, cfg, cfg)
     preds_df = _read_base_preds(preds_path)
 
     def _get_ids(df: pd.DataFrame) -> np.ndarray:
-        if "id" in df.columns:
-            return df["id"].to_numpy()
+        """
+        Return row indices into X_all for the given predictions frame.
+        Prefer explicit row index columns, but fall back to mapping external IDs
+        via preproc_meta.id_values when only an 'id' column is present.
+        """
         if "row_idx" in df.columns:
-            return df["row_idx"].to_numpy()
-        return df["row_index"].to_numpy()
+            return df["row_idx"].to_numpy(dtype=int)
+        if "row_index" in df.columns:
+            return df["row_index"].to_numpy(dtype=int)
+        if "id" in df.columns:
+            if id_to_row_index is None:
+                raise ValueError(
+                    "Base prediction file contains 'id' but preproc_meta.json is "
+                    "missing 'id_values'; cannot map IDs to row indices."
+                )
+            ids = df["id"].to_numpy()
+            row_indices: List[int] = []
+            for raw_id in ids:
+                key = int(raw_id)
+                if key not in id_to_row_index:
+                    raise IndexError(
+                        f"ID {key} from base predictions not found in preproc_meta.id_values."
+                    )
+                row_indices.append(id_to_row_index[key])
+            return np.asarray(row_indices, dtype=int)
+        raise ValueError(
+            "Base prediction file must contain one of 'row_idx', 'row_index', or 'id' columns."
+        )
 
     ids = _get_ids(preds_df).astype(int)
+    # If indices look out of bounds but we have id mapping, try a remap as a safeguard.
+    if ids.max() >= X_all.shape[0] and id_to_row_index is not None and "id" in preds_df.columns:
+        remapped = []
+        for raw_id in preds_df["id"].to_numpy():
+            key = int(raw_id)
+            if key not in id_to_row_index:
+                raise IndexError(f"ID {key} from base predictions not found in preproc_meta.id_values.")
+            remapped.append(id_to_row_index[key])
+        ids = np.asarray(remapped, dtype=int)
+        if ids.max() >= X_all.shape[0]:
+            raise IndexError(f"Remapped row indices still out of bounds (max {ids.max()} vs X dim {X_all.shape[0]}).")
     mu_pred = preds_df["y_pred_det"].to_numpy()
 
     X_split = X_all[ids]
@@ -220,14 +261,18 @@ def main() -> None:
         vacuity = (K / strength_np)
 
     out_root = Path(cfg.get("io", {}).get("evals_root", "outputs/evals"))
-    job_name = cfg.get("slurm", {}).get("job_name", "dido")
-    eval_dir = out_root / f"dido_{job_name}"
+    # Prefer the actual run directory name so the eval folder carries the job id/ts
+    run_tag = dido_dir.name
+    if not run_tag:
+        job_name = cfg.get("slurm", {}).get("job_name", "dido")
+        run_tag = job_name if str(job_name).startswith("dido") else f"dido_{job_name}"
+    eval_dir = out_root / run_tag
     eval_dir.mkdir(parents=True, exist_ok=True)
     preds_out = eval_dir / f"dido_{args.split}.csv"
 
     with preds_out.open("w", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["id", "split", "dido_strength", "dido_vacuity", "dido_entropy"])
+        w.writerow(["id", "split", "dido_strength_raw", "dido_vacuity_raw", "dido_entropy_raw"])
         for rid, s, v, e in zip(ids, strength, vacuity, entropy):
             w.writerow([rid, args.split, float(s), float(v), float(e)])
 

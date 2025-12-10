@@ -174,9 +174,10 @@ def submit_slurm(cfg_path: Path, outdir_raw: str, cfg: dict) -> None:
     )
 
     repo_root = Path(__file__).resolve().parents[1]
-    logs_root = (repo_root / "logs").resolve()
+    logs_root = (repo_root / "logs" / "train").resolve()
     logs_root.mkdir(parents=True, exist_ok=True)
-    log_stub = f"dido_{job_name}_{ts}"
+    # Keep log names aligned with the configured job_name; avoid double "dido_" prefixes
+    log_stub = f"{job_name}_{ts}" if job_name else f"dido_{ts}"
     out_log = logs_root / f"{log_stub}_%j.out"
     err_log = logs_root / f"{log_stub}_%j.err"
 
@@ -281,6 +282,13 @@ def main() -> None:
     X_all, _ = _build_features_from_meta(Path(cfg["data"]["csv_path"]).resolve(), meta)
     feature_dim = X_all.shape[1]
 
+    # Map external IDs (stored in preproc_meta.json) back to row indices so we can
+    # index into X_all even when IDs are not 0..N-1.
+    id_to_row_index = None
+    if "id_values" in meta:
+        id_values = np.asarray(meta["id_values"], dtype=int)
+        id_to_row_index = {int(value): int(idx) for idx, value in enumerate(id_values)}
+
     base_preds_cfg = cfg.get("base_preds", {}) or {}
     auto_create = bool(base_preds_cfg.get("auto_create", False))
     base_run_cfg = cfg.get("base_run", {}) or {}
@@ -294,11 +302,34 @@ def main() -> None:
     preds_val = _read_base_preds(preds_val_path)
 
     def _get_ids(df: pd.DataFrame) -> np.ndarray:
-        if "id" in df.columns:
-            return df["id"].to_numpy()
+        """
+        Return row indices into X_all for the given predictions frame.
+        Prefer explicit row index columns, but fall back to mapping external IDs
+        via preproc_meta.id_values when only an 'id' column is present.
+        """
         if "row_idx" in df.columns:
-            return df["row_idx"].to_numpy()
-        return df["row_index"].to_numpy()
+            return df["row_idx"].to_numpy(dtype=int)
+        if "row_index" in df.columns:
+            return df["row_index"].to_numpy(dtype=int)
+        if "id" in df.columns:
+            if id_to_row_index is None:
+                raise ValueError(
+                    "Base prediction file contains 'id' but preproc_meta.json is "
+                    "missing 'id_values'; cannot map IDs to row indices."
+                )
+            ids = df["id"].to_numpy()
+            row_indices: List[int] = []
+            for raw_id in ids:
+                key = int(raw_id)
+                if key not in id_to_row_index:
+                    raise IndexError(
+                        f"ID {key} from base predictions not found in preproc_meta.id_values."
+                    )
+                row_indices.append(id_to_row_index[key])
+            return np.asarray(row_indices, dtype=int)
+        raise ValueError(
+            "Base prediction file must contain one of 'row_idx', 'row_index', or 'id' columns."
+        )
 
     y_true_tr = preds_train["y_true"].to_numpy()
     y_pred_tr = preds_train["y_pred_det"].to_numpy()
