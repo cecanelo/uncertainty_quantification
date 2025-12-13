@@ -133,34 +133,45 @@ def _apply_encoders(df: pd.DataFrame,
                     enc: Dict) -> np.ndarray:
     feats = []
 
+    n_rows = len(df)
+
     # numeric
     for c in numeric_cols:
-        x = df[c].astype(float).fillna(np.nan).to_numpy()
-        feats.append(_standardize_apply(x, enc["num"][c]).reshape(-1, 1))
+        if c in df.columns:
+            x = df[c].astype(float).fillna(np.nan).to_numpy()
+            feats.append(_standardize_apply(x, enc["num"][c]).reshape(-1, 1))
+        else:
+            # Column missing in this CSV (e.g., some OOD splits). Represent it
+            # as all-zeros in standardized space, which corresponds to the
+            # training mean under z-scoring.
+            feats.append(np.zeros((n_rows, 1), dtype=np.float32))
 
     # onehot
     for c in onehot_cols:
         levels = enc["oh_levels"][c]
-        s = df[c].astype(str).fillna("__NA__")
-        mat = np.zeros((len(s), len(levels)), dtype=np.float32)
-        idx = {lv: i for i, lv in enumerate(levels)}
-        for i, val in enumerate(s):
-            j = idx.get(val)
-            if j is not None:
-                mat[i, j] = 1.0
+        mat = np.zeros((n_rows, len(levels)), dtype=np.float32)
+        if c in df.columns:
+            s = df[c].astype(str).fillna("__NA__")
+            idx = {lv: i for i, lv in enumerate(levels)}
+            for i, val in enumerate(s):
+                j = idx.get(val)
+                if j is not None:
+                    mat[i, j] = 1.0
+        # if column is missing, we keep the all-zero matrix
         feats.append(mat)
 
     # hashed high-card columns (signed hashing to reduce collision bias)
     for c in hash_cols:
         n = int(enc["hash_dims"][c])
-        s = df[c].astype(str).fillna("__NA__")
-        mat = np.zeros((len(s), n), dtype=np.float32)
-        for i, val in enumerate(s):
-            key = f"{c}={val}"
-            j = _hash_bucket(key, n)
-            # NEW: use a second hash to choose ±1 sign; helps collisions cancel rather than only add
-            sign = -1.0 if (_hash_bucket(key + "#sign", 2) % 2) else 1.0
-            mat[i, j] = sign
+        mat = np.zeros((n_rows, n), dtype=np.float32)
+        if c in df.columns:
+            s = df[c].astype(str).fillna("__NA__")
+            for i, val in enumerate(s):
+                key = f"{c}={val}"
+                j = _hash_bucket(key, n)
+                # use a second hash to choose ±1 sign; helps collisions cancel
+                sign = -1.0 if (_hash_bucket(key + "#sign", 2) % 2) else 1.0
+                mat[i, j] = sign
         feats.append(mat)
 
 

@@ -170,7 +170,8 @@ def main() -> None:
     out_pat = os.path.join(logs_root, f"{job_name}_%A_%a.out")
     err_pat = os.path.join(logs_root, f"{job_name}_%A_%a.err")
 
-    worker_script = "scripts/hpo_optuna_worker.py"  # We will provide this next
+    # We'll run the worker via a small bash wrapper that activates the configured conda env.
+    worker_script = "scripts/hpo_optuna_worker.py"
 
     gres = []
     gpus = int(resources.get("gpus", 0))
@@ -182,6 +183,23 @@ def main() -> None:
         f"JOB_ROOT={os.path.abspath(job_root)}",
         f"TRIAL_DIR_TEMPLATE={io_cfg['trial_dir_template']}",
     ])
+
+    # Build a per-job wrapper script that activates the desired conda env and runs the worker.
+    repo_root = Path(__file__).resolve().parents[1]
+    conda_env = resources.get("conda_env", "thesis")
+    wrapper_path = Path(job_root) / "hpo_worker.sh"
+    wrapper_script = f"""#!/bin/bash
+cd "{repo_root}"
+source "$HOME/miniconda3/etc/profile.d/conda.sh"
+conda activate {conda_env}
+python "{worker_script}" "$@"
+"""
+    with open(wrapper_path, "w") as f:
+        f.write(wrapper_script)
+    try:
+        wrapper_path.chmod(0o755)
+    except Exception:
+        pass
 
     sbatch_cmd = [
         "sbatch",
@@ -195,7 +213,7 @@ def main() -> None:
         "-e", err_pat,
         "--export", f"ALL,{export_env}",
         *gres,
-        worker_script,
+        str(wrapper_path),
     ]
 
     # --- User-facing summary ---

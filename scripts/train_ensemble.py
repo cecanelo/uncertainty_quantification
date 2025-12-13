@@ -223,17 +223,30 @@ def main() -> None:
     ap.add_argument("--base-seed", type=int, default=None, help="Override base seed (else uses cfg['seed'])")
     args = ap.parse_args()
 
-    wrapper_cfg = load_yaml(Path(args.wrapper)) if args.wrapper else None
-    if wrapper_cfg:
+    wrapper_cfg = None
+    base_cfg = None
+
+    if args.wrapper:
+        wrapper_cfg = load_yaml(Path(args.wrapper))
         if "base_config" not in wrapper_cfg:
             raise SystemExit("Wrapper config must specify base_config")
         cfg_path = Path(wrapper_cfg["base_config"]).resolve()
     elif args.config:
-        cfg_path = Path(args.config).resolve()
+        # Heuristic: if the provided file looks like a wrapper (has base_config and no model),
+        # treat it as a wrapper even when passed via --config.
+        probe_path = Path(args.config).resolve()
+        probe_cfg = load_yaml(probe_path)
+        if "base_config" in probe_cfg and "model" not in probe_cfg:
+            wrapper_cfg = probe_cfg
+            cfg_path = Path(wrapper_cfg["base_config"]).resolve()
+        else:
+            cfg_path = probe_path
+            base_cfg = probe_cfg
     else:
         raise SystemExit("Provide --config or --wrapper")
 
-    base_cfg = load_yaml(cfg_path)
+    if base_cfg is None:
+        base_cfg = load_yaml(cfg_path)
 
     # Allow wrapper to override SLURM settings (e.g., conda_env) so users don't have to edit base config
     if wrapper_cfg and "slurm" in wrapper_cfg:

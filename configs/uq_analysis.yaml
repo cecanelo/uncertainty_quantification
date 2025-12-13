@@ -1,0 +1,50 @@
+# Base configuration for uncertainty analysis.
+# This file is intended to be read by notebooks or scripts that import
+# `scripts/uq_eval.py`. It specifies where eval outputs live, which
+# runs to include, and high-level analysis settings.
+#
+# Fields:
+#   settings.eval_root        : root directory for eval outputs
+#   settings.dido_mode        : "logistic" or "raw"
+#   settings.n_mc_samples     : expected MC samples per point (for info)
+#   settings.n_ensemble_members : expected ensemble size (for info)
+#   settings.n_nf_samples     : NF samples per point when drawing from flows
+#   settings.large_error_quantile : quantile used for the "large error" threshold
+#
+#   runs.*                    : explicit run directories under eval_root.
+#                               If null, analysis code can fall back to
+#                               discovering the latest directory matching
+#                               the corresponding pattern in run_patterns.
+#
+#   run_patterns.*            : glob patterns used for discovery when runs.*
+#                               is null.
+
+settings:
+  eval_root: outputs/evals
+  dido_mode: logistic
+  n_mc_samples: 50
+  n_ensemble_members: 10
+  n_nf_samples: 200
+  large_error_quantile: 0.9
+
+runs:
+  point_xs: null          # e.g. point_xs_20251210-184525_291935
+  lpl_xs: null            # e.g. lpl_xs_20251210-184537_291936
+  gau_xs: null            # e.g. gau_xs_20251210-184548_291937
+  esm_lpl_xs: null        # e.g. esm_laplace_lpl_xs_...
+  esm_gau_xs: null        # e.g. esm_gauss_gau_xs_...
+  nf_lpl_xs: null         # e.g. nf_lpl_xs_...
+  nf_gau_xs: null         # e.g. nf_gau_xs_...
+  dido_lpl_xs: null       # e.g. dido_lpl_xs_...
+  dido_gau_xs: null       # e.g. dido_gau_xs_...
+
+run_patterns:
+  point_xs: point_xs_*
+  lpl_xs: lpl_xs_*
+  gau_xs: gau_xs_*
+  esm_lpl_xs: esm_laplace_lpl_xs_*
+  esm_gau_xs: esm_gauss_gau_xs_*
+  nf_lpl_xs: nf_lpl_xs_*
+  nf_gau_xs: nf_gau_xs_*
+  dido_lpl_xs: dido_lpl_xs_*
+  dido_gau_xs: dido_gau_xs_*

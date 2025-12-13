@@ -11,14 +11,17 @@ slurm:
 data:
   csv_path: "/home/canelo/uncertainty_quantification/datasets/craigslist_cleaned.csv"
 
+# Single source: set base_run_dir to the Gaussian base run; other paths will be inferred.
+base_run_dir: ""
+
 base_artifacts:
-  # Path to the base Gaussian run's preproc_meta.json
-  preproc_meta_path: "/home/canelo/uncertainty_quantification/outputs/trainings/training_gauss_50t_100e/gauss_50t_100e_290926/preproc_meta.json"
+  # Path to the base Gaussian run's preproc_meta.json (optional if base_run_dir is set)
+  preproc_meta_path: ""
 
 base_run:
-  # Used for auto-creating flow CSVs if they are missing
-  config_path: "/home/canelo/uncertainty_quantification/outputs/trainings/training_gauss_50t_100e/gauss_50t_100e_290926/used_config.yaml"
-  model_dir: "/home/canelo/uncertainty_quantification/outputs/trainings/training_gauss_50t_100e/gauss_50t_100e_290926/"
+  # Used for auto-creating flow CSVs if they are missing (optional if base_run_dir is set)
+  config_path: ""
+  model_dir: ""
 
 base_preds:
   # If present, use these flow CSVs; otherwise auto-create them below

@@ -1,16 +1,16 @@
 study:
-    name: "nf_lpl_50t_100e"
+    name: "nf_lpl_m"
     storage: "sqlite:///optuna_studies/hpo.db"
     direction: "minimize"
     resume: true
 
 budget:
-    n_trials: 50                # small run for quick checks; increase for full HPO
+    n_trials: 25                # small run for quick checks; increase for full HPO
 
 resources:
     partition: "STUD"
     time: "00:50:00"
-    mem_gb: 30
+    mem_gb: 32
     cpus_per_task: 4
     gpus: 1
     conda_env: "thesis"
@@ -27,6 +27,8 @@ base_config:
     train_script_path: "scripts/train_flows.py"
 
 trial_overrides:
+    # Single source: Laplace base run used by all NF Laplace trials in this study.
+    base_run_dir: "/home/canelo/uncertainty_quantification/outputs/trainings/training_lpl_m/lpl_m_20251211-144033_292629"
     evaluation:
         after_train: false
 
@@ -42,7 +44,7 @@ pruner:
         n_startup_trials: 15
 
 search_space:
-    - { name: "training.epochs",        dist: "choice", choices: [100] }
+    - { name: "training.epochs",        dist: "choice", choices: [50] }
     - { name: "training.lr",            dist: "loguniform", low: 1.0e-4, high: 3.0e-3 }
     - { name: "training.weight_decay",  dist: "loguniform", low: 1.0e-6, high: 1.0e-2 }
     - { name: "training.batch_size",    dist: "choice", choices: [512, 1024] }

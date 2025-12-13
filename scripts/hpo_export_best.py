@@ -173,6 +173,10 @@ def main() -> None:
     study = optuna.load_study(study_name=study_cfg["name"], storage=study_cfg["storage"])
     best = study.best_trial
 
+    # Helper: map optuna trial number -> value for quick lookup
+    trial_values = {t.number: t.value for t in study.trials if t.value is not None}
+    direction = study.direction.name.lower()
+
     job_root_arg = args.job_root
     if not job_root_arg and args.job_id:
         base = Path(io_cfg.get("outputs_root", "outputs/optuna"))
@@ -229,7 +233,68 @@ def main() -> None:
         training_root = Path("outputs") / f"training_{job_tag}"
 
     trials_root = job_root / "trials"
-    trial_dir = find_trial_dir_for_optuna_number(trials_root, best.number)
+    # Collect available trial directories with their optuna trial numbers (from hpo_meta/run_meta)
+    trial_meta = []
+    if trials_root.exists():
+        for d in sorted(trials_root.iterdir()):
+            if not d.is_dir():
+                continue
+            optuna_no = None
+            for meta_name in ("hpo_meta.json", "run_meta.json"):
+                meta_path = d / meta_name
+                if meta_path.exists():
+                    try:
+                        meta = json.loads(meta_path.read_text())
+                        optuna_no = int(meta.get("optuna", {}).get("trial_number"))
+                        break
+                    except Exception:
+                        pass
+            trial_meta.append((d, optuna_no, d.stat().st_mtime))
+
+    chosen_trial_no = int(best.number)
+    chosen_value = float(best.value)
+    chosen_params = dict(best.params)
+    # Maybe switch to the params from the chosen trial (if it differs from study best)
+    def _params_for_trial(num: int) -> Optional[dict]:
+        for t in study.trials:
+            if t.number == num:
+                return dict(t.params)
+        return None
+
+    trial_dir = find_trial_dir_for_optuna_number(trials_root, chosen_trial_no)
+    if trial_dir is None:
+        # Fallback: if the global best trial isn't present locally, pick the best trial among
+        # the directories we do have (using Optuna values + study direction).
+        trial_map = {n: d for d, n, _ in trial_meta if n is not None}
+        present_numbers = [n for n in trial_map if n in trial_values]
+        def _is_better(a, b):
+            return a < b if direction == "minimize" else a > b
+
+        if present_numbers:
+            chosen_trial_no = present_numbers[0]
+            for n in present_numbers[1:]:
+                if _is_better(trial_values[n], trial_values[chosen_trial_no]):
+                    chosen_trial_no = n
+            trial_dir = trial_map[chosen_trial_no]
+            chosen_value = float(trial_values[chosen_trial_no])
+            params = _params_for_trial(chosen_trial_no)
+            if params is not None:
+                chosen_params = params
+        elif trial_meta:
+            # No values, just pick the newest directory
+            newest = sorted(trial_meta, key=lambda x: x[2], reverse=True)[0]
+            trial_dir = newest[0]
+            if newest[1] is not None and newest[1] in trial_values:
+                chosen_trial_no = newest[1]
+                chosen_value = float(trial_values[newest[1]])
+                params = _params_for_trial(chosen_trial_no)
+                if params is not None:
+                    chosen_params = params
+        # Final guard: direct canonical folder check
+        if trial_dir is None:
+            cand = trials_root / f"trial_{best.number:05d}"
+            if cand.exists():
+                trial_dir = cand
 
 
     job_id = None
@@ -249,9 +314,12 @@ def main() -> None:
             "name": study.study_name,
             "direction": study.direction.name.lower(),
         },
-        "best_value": float(best.value),
-        "best_trial_number": int(best.number),
-        "params": dict(best.params),
+        # Study best (for reference) and chosen best (usable) may diverge when old trial dirs are missing.
+        "best_value": float(chosen_value),
+        "best_trial_number": int(chosen_trial_no),
+        "study_best_value": float(best.value),
+        "study_best_trial_number": int(best.number),
+        "params": dict(chosen_params),
         "trial_dir": str(trial_dir) if trial_dir else None,
         "artifacts": {},
         "io": {
@@ -277,8 +345,15 @@ def main() -> None:
         best_cfg_filename = post.get("best_config_filename", "train_config_from_best.yaml")
         best_cfg_path = None
         try:
+            merged_cfg = None
             if trial_dir and (trial_dir / "train_config_merged.yaml").exists():
                 merged_cfg = load_yaml(str(trial_dir / "train_config_merged.yaml"))
+            else:
+                # Fallback: start from base_config if the trial directory is missing
+                base_cfg_path = Path(cfg.get("base_config", {}).get("train_config_path", ""))
+                if base_cfg_path.exists():
+                    merged_cfg = load_yaml(str(base_cfg_path))
+            if merged_cfg is not None:
                 # Overlay optional post_run.train_overrides (schema matches train config)
                 merged_cfg = _deep_merge(merged_cfg, post.get("train_overrides", {}))
 

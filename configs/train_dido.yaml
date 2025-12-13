@@ -2,29 +2,30 @@ seed: 1
 
 slurm:
   partition: "STUD"
-  time: "01:00:00"
-  mem_gb: 48
+  time: "00:50:00"
+  mem_gb: 32
   cpus: 4
   gpus: 1
-  job_name: "dido_lpl"
+  job_name: "dido"
   conda_env: "thesis"
 
 data:
   csv_path: "/home/canelo/uncertainty_quantification/datasets/craigslist_cleaned.csv"
 
+# Single source: filled by HPO via base_run_dir; other paths are inferred in train_dido.py
+base_run_dir: ""
+
 base_artifacts:
-  # Path to the base run's preproc_meta.json
-  preproc_meta_path: "/home/canelo/uncertainty_quantification/outputs/trainings/training_laplace_50t_100e/laplace_50t_100e_290895/preproc_meta.json"
+  # Path to the base run's preproc_meta.json (optional if base_run_dir is set)
+  preproc_meta_path: ""
 
 base_run:
-  # Used for auto-creating base preds if they are missing
-  config_path: "/home/canelo/uncertainty_quantification/outputs/trainings/training_laplace_50t_100e/laplace_50t_100e_290895/used_config.yaml"
-  model_dir: "/home/canelo/uncertainty_quantification/outputs/trainings/training_laplace_50t_100e/laplace_50t_100e_290895"
+  # Used for auto-creating base preds if they are missing (optional if base_run_dir is set)
+  config_path: ""
+  model_dir: ""
 
 base_preds:
-  # If present, use these; otherwise auto-create them below
-  # train_csv: "/home/canelo/uncertainty_quantification/outputs/evals/laplace_tiny_289394/preds_train.csv"
-  # val_csv: "/home/canelo/uncertainty_quantification/outputs/evals/laplace_tiny_289394/preds_val.csv"
+  # If present, use these; otherwise auto-create them via eval_regression.py
   auto_create: true
 
 binning:

@@ -1,0 +1,71 @@
+# Batch configuration for running OOD evaluations for all UQ methods:
+#   - base regression heads (point / Laplace / Gauss) + ensembles
+#   - NF heads (Laplace / Gauss)
+#   - DIDO (Laplace / Gauss)
+#
+# This file is consumed by scripts/run_ood_eval_all_methods.py.
+
+run_tag: "_m_"  # substring used to select runs, e.g. "_xs_", "_m_", "_l_"
+
+methods:
+  regression:
+    enabled: true
+    # Roots under which regression runs and ensembles live
+    roots:
+      - outputs/trainings
+      - outputs/trainings/ensembles
+    # Only keep runs whose used_config.yaml has a base head type in this set
+    head_types: ["point", "laplace", "gauss"]
+
+  nf:
+    enabled: true
+    # NF runs (train_flows) usually live under outputs/trainings
+    roots:
+      - outputs/trainings
+
+  dido:
+    enabled: true
+    # DIDO runs (train_dido) usually live under outputs/trainings
+    roots:
+      - outputs/trainings
+
+# OOD datasets to evaluate on. You can toggle any of these via `enabled`.
+ood_sets:
+  geo:
+    enabled: true
+    csv: datasets/craigslist_ood_geo_fl_tx.csv
+
+  rare_manu:
+    enabled: true
+    csv: datasets/craigslist_ood_rare_manufacturers.csv
+
+  tail_mpy:
+    enabled: true
+    csv: datasets/craigslist_ood_tail_mpy_high.csv
+
+  tail_odo:
+    enabled: true
+    csv: datasets/craigslist_ood_tail_odo_high.csv
+
+  tail_year_old:
+    enabled: true
+    csv: datasets/craigslist_ood_tail_year_old.csv
+
+  tail_multi:
+    enabled: true
+    csv: datasets/craigslist_ood_tail_multi.csv
+
+options:
+  split: test  # kept for symmetry; NF/DIDO treat OOD as test-like
+
+slurm:
+  # Default SLURM settings for running the OOD batch on the cluster.
+  # Edit these to match your environment.
+  partition: TEST
+  time: "00:50:00"
+  mem_gb: 16
+  cpus: 1
+  gpus: 1
+  job_name: "ood_all"
+  conda_env: "thesis_pascal"
+

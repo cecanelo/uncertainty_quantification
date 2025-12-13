@@ -192,7 +192,13 @@ def _write_csv(
             writer.writerow(row)
 
 
-def evaluate(cfg_path: Path, ensemble_root: Path, splits: List[str], save_dir: Path, include_members: bool) -> None:
+def evaluate(
+    cfg_path: Path,
+    ensemble_root: Path,
+    splits: List[str],
+    save_dir: Path,
+    include_members: bool,
+) -> None:
     base_cfg = load_yaml(cfg_path)
     members = _member_paths(ensemble_root)
     first_member = members[0]
@@ -222,6 +228,8 @@ def evaluate(cfg_path: Path, ensemble_root: Path, splits: List[str], save_dir: P
     in_dim = int(meta["feature_dim"])
 
     save_dir.mkdir(parents=True, exist_ok=True)
+    if include_members:
+        save_dir.mkdir(parents=True, exist_ok=True)
     metrics: Dict[str, dict] = {}
     start_time = time.perf_counter()
     start_utc = datetime.utcnow().isoformat() + "Z"
@@ -271,6 +279,7 @@ def evaluate(cfg_path: Path, ensemble_root: Path, splits: List[str], save_dir: P
         out_csv = save_dir / f"ensemble_preds_{split_key}.csv"
         _write_csv(out_csv, ids_split, split_key, head_type, len(members), y_true_orig, y_pred_orig,
                    sigma_ale_orig, sigma_epi_orig, member_preds_orig)
+
         print(f"[eval-ensemble] wrote {out_csv} (n={len(idx)})")
 
         ae = np.abs(y_pred_orig - y_true_orig)
@@ -307,7 +316,10 @@ def submit_slurm(
     time_str = slurm_cfg.get("time", "00:30:00")
     mem_gb = int(slurm_cfg.get("mem_gb", 16))
     cpus = int(slurm_cfg.get("cpus", 2))
+    # Ensemble eval is light; default to CPU to avoid GPU arch mismatches
     gpus = int(slurm_cfg.get("gpus", 0))
+    if "gpus" not in slurm_cfg:
+        gpus = 0
     conda_env = slurm_cfg.get("conda_env", "thesis")
     job_name = slurm_cfg.get("job_name", "eval_ensemble")
 
@@ -338,6 +350,7 @@ def submit_slurm(
         f"cd \"{REPO_ROOT}\"",
         'source "$HOME/miniconda3/etc/profile.d/conda.sh"',
         f"conda activate {conda_env}",
+        'export CUDA_VISIBLE_DEVICES=""',
         'echo "[env] host=$(hostname) date=$(date)"',
         f"python \"{Path(__file__).resolve()}\" "
         f"--config \"{cfg_path}\" "
@@ -363,22 +376,74 @@ def submit_slurm(
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Evaluate an ensemble of trained regression models")
-    ap.add_argument("--config", required=True, help="Base train config used for members")
-    ap.add_argument("--ensemble-root", required=True, help="Folder containing member_* subdirs")
+    ap.add_argument("--config", required=False, help="Base train config used for members (optional when --job-id is used)")
+    ap.add_argument("--ensemble-root", required=False, help="Folder containing member_* subdirs (optional when --job-id is used)")
+    ap.add_argument("--job-id", required=False, help="SLURM job id to auto-locate the ensemble run")
+    ap.add_argument("--search-root", default="outputs/trainings/ensembles", help="Root to search for ensemble runs when using --job-id")
     ap.add_argument("--splits", nargs="+", default=["val"], help="Splits to evaluate (train/val/test)")
     ap.add_argument("--save-dir", default=None, help="Where to write outputs (default: outputs/evals/ensemble_<run>)")
     ap.add_argument("--include-members", action="store_true", default=True, help="Include per-member predictions in CSV (default: True)")
     ap.add_argument("--no-include-members", dest="include_members", action="store_false", help="Disable per-member predictions in CSV")
-    ap.add_argument("--mode", choices=["local", "slurm"], default="local", help="local: run here; slurm: submit sbatch")
+    ap.add_argument("--mode", choices=["local", "slurm"], default="slurm", help="local: run here; slurm: submit sbatch (default)")
     args = ap.parse_args()
 
-    cfg_path = Path(args.config).resolve()
-    ensemble_root = Path(args.ensemble_root).resolve()
+    def _find_ensemble_root(jobid: str, search_root: Path) -> Path | None:
+        candidates = []
+        for p in search_root.rglob(f"*{jobid}*"):
+            if p.is_dir() and (p / "ensemble_manifest.json").exists():
+                try:
+                    mtime = p.stat().st_mtime
+                except Exception:
+                    mtime = 0
+                candidates.append((mtime, p))
+        if not candidates:
+            return None
+        candidates.sort(key=lambda x: x[0], reverse=True)
+        return candidates[0][1]
+
+    ensemble_root: Path
+    if args.ensemble_root:
+        ensemble_root = Path(args.ensemble_root).resolve()
+    elif args.job_id:
+        search_root = Path(args.search_root).resolve()
+        found = _find_ensemble_root(str(args.job_id), search_root)
+        if not found:
+            raise SystemExit(f"Could not locate ensemble root containing job id {args.job_id} under {search_root}")
+        ensemble_root = found
+        print(f"[eval-ensemble] Resolved ensemble_root via job-id: {ensemble_root}")
+    else:
+        raise SystemExit("Provide --ensemble-root or --job-id")
+
+    cfg_path: Path
+    if args.config:
+        cfg_path = Path(args.config).resolve()
+    else:
+        # Try snapshot in ensemble_root
+        snap = ensemble_root / "base_config.yaml"
+        manifest_path = ensemble_root / "ensemble_manifest.json"
+        snap_path = None
+        if snap.exists():
+            snap_path = snap
+        elif manifest_path.exists():
+            try:
+                man = load_json(manifest_path)
+                bc = man.get("base_config")
+                if bc:
+                    cand = Path(bc)
+                    if cand.exists():
+                        snap_path = cand
+            except Exception:
+                pass
+        if snap_path is None:
+            raise SystemExit("Could not infer base config; please provide --config")
+        cfg_path = snap_path
+        print(f"[eval-ensemble] Using inferred base config: {cfg_path}")
 
     if args.save_dir:
         save_dir = Path(args.save_dir).resolve()
     else:
-        save_dir = (REPO_ROOT / "outputs" / "evals" / f"ensemble_{ensemble_root.name}").resolve()
+        # Default: outputs/evals/<ensemble_root_name>
+        save_dir = (REPO_ROOT / "outputs" / "evals" / ensemble_root.name).resolve()
 
     if args.mode == "slurm":
         base_cfg = load_yaml(cfg_path)

@@ -183,11 +183,40 @@ def main() -> None:
     args = ap.parse_args()
 
     cfg = _load_yaml(Path(args.config))
+    # Optional single-source pointer: infer base paths from base_run_dir/run_dir when provided
+    base_run_dir_raw = cfg.get("base_run_dir") or cfg.get("base_run", {}).get("run_dir")
+    if base_run_dir_raw:
+        base_run_dir = Path(base_run_dir_raw).expanduser().resolve()
+        cfg.setdefault("base_run", {})
+        for key, val in [
+            ("run_dir", str(base_run_dir)),
+            ("model_dir", str(base_run_dir)),
+            ("config_path", str(base_run_dir / "used_config.yaml")),
+            ("outdir", str(base_run_dir)),
+        ]:
+            if not cfg["base_run"].get(key):
+                cfg["base_run"][key] = val
+        for key in ("run_dir", "model_dir", "config_path", "outdir"):
+            if not cfg["base_run"].get(key):
+                cfg["base_run"][key] = str(base_run_dir if key not in ("config_path",) else base_run_dir / "used_config.yaml")
+        cfg.setdefault("base_artifacts", {})
+        if not cfg["base_artifacts"].get("preproc_meta_path"):
+            cfg["base_artifacts"]["preproc_meta_path"] = str(base_run_dir / "preproc_meta.json")
     outdir = Path(args.outdir).resolve()
     if not (outdir / "model.pt").exists():
         raise FileNotFoundError(f"Flow checkpoint model.pt not found in {outdir}")
 
-    meta_path = Path(cfg["base_artifacts"]["preproc_meta_path"]).resolve()
+    meta_path = Path(cfg["base_artifacts"]["preproc_meta_path"]).expanduser().resolve()
+    if meta_path.is_dir():
+        base_run_cfg = cfg.get("base_run", {}) or {}
+        cand_dir = base_run_cfg.get("run_dir") or base_run_cfg.get("model_dir") or base_run_cfg.get("outdir")
+        if cand_dir:
+            cand = Path(cand_dir).expanduser().resolve() / "preproc_meta.json"
+            if cand.exists():
+                meta_path = cand
+                cfg["base_artifacts"]["preproc_meta_path"] = str(cand)
+    if not meta_path.exists() or meta_path.is_dir():
+        raise SystemExit(f"base_artifacts.preproc_meta_path is invalid: {meta_path}")
     meta = _load_preproc_meta(meta_path)
 
     data_csv = Path(cfg["data"]["csv_path"]).resolve()
@@ -262,7 +291,7 @@ def main() -> None:
     with out_csv.open("w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow([
-            "row_idx",
+            "id",
             "split",
             "head_type",
             "y_true_orig",

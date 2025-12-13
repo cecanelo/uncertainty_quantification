@@ -1,25 +1,28 @@
 seed: 1
 
 slurm:
-  partition: "STUD"
-  time: "00:55:00"
-  mem_gb: 32
-  cpus: 4
+  partition: "TEST"
+  time: "00:50:00"
+  mem_gb: 30
+  cpus: 2
   gpus: 1
-  job_name: "nf_lpl"
+  job_name: "nf_lpl_xs"
   conda_env: "thesis"
 
 data:
   csv_path: "/home/canelo/uncertainty_quantification/datasets/craigslist_cleaned.csv"
 
+# Single source: set base_run_dir to the Laplace base run; other paths will be inferred.
+base_run_dir: ""
+
 base_artifacts:
-  # Path to the base Laplace run's preproc_meta.json
-  preproc_meta_path: "/home/canelo/uncertainty_quantification/outputs/trainings/training_laplace_50t_100e/laplace_50t_100e_290895/preproc_meta.json"
+  # Path to the base Laplace run's preproc_meta.json (optional if base_run_dir is set)
+  preproc_meta_path: ""
 
 base_run:
-  # Used for auto-creating flow CSVs if they are missing
-  config_path: "/home/canelo/uncertainty_quantification/outputs/trainings/training_laplace_50t_100e/laplace_50t_100e_290895/used_config.yaml"
-  model_dir: "/home/canelo/uncertainty_quantification/outputs/trainings/training_laplace_50t_100e/laplace_50t_100e_290895"
+  # Used for auto-creating flow CSVs if they are missing (optional if base_run_dir is set)
+  config_path: ""
+  model_dir: ""
 
 base_preds:
   # If present, use these flow CSVs; otherwise auto-create them below

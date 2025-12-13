@@ -187,12 +187,19 @@ def build_and_save_splits(
     df.loc[mask_id_final].to_csv(id_csv, index=False)
 
     # Each OOD CSV (note: sets may overlap; that's intentional for multi-tail, etc.)
+    # For each OOD mask we write:
+    #   - a full-feature CSV: craigslist_{name}.csv       (for regression/NF/DIDO)
+    #   - a masked CSV      : craigslist_{name}_masked.csv (for classifier experiments)
     for name, mask in ood_sets.items():
-        out_csv = out_dir / f"craigslist_{name}.csv"
-        # Drop columns that would make the split trivial, if present
+        # Full-feature OOD: keep all columns produced by _prepare_frame.
+        full_csv = out_dir / f"craigslist_{name}.csv"
+        df.loc[mask].to_csv(full_csv, index=False)
+
+        # Masked OOD: drop columns that make the split trivial.
+        masked_csv = out_dir / f"craigslist_{name}_masked.csv"
         drop_cols = [c for c in ood_drop_columns.get(name, []) if c in df.columns]
         df_out = df.loc[mask].drop(columns=drop_cols, errors="ignore")
-        df_out.to_csv(out_csv, index=False)
+        df_out.to_csv(masked_csv, index=False)
 
     if verbose:
         n_total = len(df)

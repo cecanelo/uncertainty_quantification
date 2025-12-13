@@ -1,0 +1,31 @@
+base_config: "/home/canelo/uncertainty_quantification/outputs/trainings/training_lpl_m/lpl_m_20251211-144033_292629/used_config.yaml"
+
+run:
+  mode: "slurm"
+
+slurm:
+  partition: "STUD"
+  time: "00:50:00"
+  mem_gb: 32
+  cpus: 4
+  gpus: 1
+  job_name: "esm"   # will be prefixed esm_<head>_ automatically
+  conda_env: "thesis"
+  max_parallel: 4
+
+ensemble:
+  n_members: 10
+  base_seed: 1
+
+member_overrides:
+  training:
+    eval_after_train: true
+    mc_eval:
+      enabled: false         # toggle MC-dropout for ensemble members here
+      n_samples: 50         # adjust per ensemble without touching base config
+      include_samples: true
+      batch_size: 512
+
+io:
+  ensemble_root: "outputs/trainings/ensembles/{job}_{ts}_{jobid}"  # {job} already prefixed esm_<head>_
+  evals_root: "outputs/evals/{ensemble}"

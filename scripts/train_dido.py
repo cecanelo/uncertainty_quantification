@@ -276,6 +276,22 @@ def main() -> None:
     start_time = time.perf_counter()
     start_iso = datetime.utcnow().isoformat() + "Z"
 
+    # Optional single-source pointer: infer base paths from base_run_dir/run_dir when provided
+    base_run_dir_raw = cfg.get("base_run_dir") or cfg.get("base_run", {}).get("run_dir")
+    if base_run_dir_raw:
+        base_run_dir = Path(base_run_dir_raw).expanduser().resolve()
+        cfg.setdefault("base_run", {})
+        for key, val in [
+            ("run_dir", str(base_run_dir)),
+            ("model_dir", str(base_run_dir)),
+            ("config_path", str(base_run_dir / "used_config.yaml")),
+        ]:
+            if not cfg["base_run"].get(key):
+                cfg["base_run"][key] = val
+        cfg.setdefault("base_artifacts", {})
+        if not cfg["base_artifacts"].get("preproc_meta_path"):
+            cfg["base_artifacts"]["preproc_meta_path"] = str(base_run_dir / "preproc_meta.json")
+
     base_meta_path = Path(cfg["base_artifacts"]["preproc_meta_path"]).resolve()
     meta = _load_preproc_meta(base_meta_path)
 
@@ -294,6 +310,13 @@ def main() -> None:
     base_run_cfg = cfg.get("base_run", {}) or {}
     base_cfg_path = Path(base_run_cfg.get("config_path", "")) if base_run_cfg.get("config_path") else None
     base_model_dir = Path(base_run_cfg.get("model_dir", "")) if base_run_cfg.get("model_dir") else None
+    base_head_type = None
+    if base_cfg_path is not None and base_cfg_path.exists():
+        try:
+            _base_cfg = yaml.safe_load(base_cfg_path.read_text())
+            base_head_type = (_base_cfg.get("model", {}) or {}).get("head_type")
+        except Exception:
+            base_head_type = None
 
     preds_train_path = _ensure_preds("train", base_preds_cfg, auto_create, base_cfg_path, base_model_dir)
     preds_val_path = _ensure_preds("val", base_preds_cfg, auto_create, base_cfg_path, base_model_dir)
@@ -477,6 +500,7 @@ def main() -> None:
 
     run_meta = {
         "head_type": "dido",
+        "base_head_type": base_head_type,
         "binning": {
             "K": K,
             "use_abs_error": use_abs,

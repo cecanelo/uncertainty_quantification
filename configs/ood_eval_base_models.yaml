@@ -1,0 +1,46 @@
+#
+# Batch configuration for running OOD evaluations for base regression models.
+# This file is consumed by scripts/run_ood_eval_batch.py.
+#
+# You normally run:
+#   python scripts/run_ood_eval_batch.py \
+#       --auto-discover-base
+#       # (optional) override run_tag: --run-tag "_xs_"
+#
+# In that mode, base_runs below are ignored and the script scans
+# outputs/trainings/** for runs whose directory name contains run_tag
+# (see below) and have a used_config.yaml. You can still use the
+# base_runs block if you ever want fully manual control.
+
+run_tag: "_m_"   # default tag for auto-discovery; can be overridden with --run-tag
+
+base_runs: {}
+
+ood_sets:
+  geo:
+    enabled: true
+    csv: datasets/craigslist_ood_geo_fl_tx.csv
+
+  rare_manu:
+    enabled: true
+    csv: datasets/craigslist_ood_rare_manufacturers.csv
+
+  tail_mpy:
+    enabled: true
+    csv: datasets/craigslist_ood_tail_mpy_high.csv
+
+  tail_odo:
+    enabled: true
+    csv: datasets/craigslist_ood_tail_odo_high.csv
+
+  tail_year_old:
+    enabled: true
+    csv: datasets/craigslist_ood_tail_year_old.csv
+
+  tail_multi:
+    enabled: true
+    csv: datasets/craigslist_ood_tail_multi.csv
+
+options:
+  # Which split name to record in the OOD prediction CSVs.
+  split: test

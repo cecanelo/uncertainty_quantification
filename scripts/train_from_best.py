@@ -165,6 +165,36 @@ def main() -> None:
                     return candidate
         return None
 
+    def _resolve_trial_dir(job_root: Path, payload: dict) -> Path | None:
+        """Best-effort resolution of a trial directory from job_root/trials."""
+        trials_root = job_root / "trials"
+        if not trials_root.exists():
+            return None
+        meta = []
+        for d in sorted(trials_root.iterdir()):
+            if not d.is_dir():
+                continue
+            optuna_no = None
+            for meta_name in ("hpo_meta.json", "run_meta.json"):
+                mp = d / meta_name
+                if mp.exists():
+                    try:
+                        m = json.loads(mp.read_text())
+                        optuna_no = int(m.get("optuna", {}).get("trial_number"))
+                        break
+                    except Exception:
+                        pass
+            meta.append((d, optuna_no, d.stat().st_mtime))
+
+        target_no = payload.get("best_trial_number") or payload.get("study_best_trial_number")
+        if target_no is not None:
+            for d, no, _ in meta:
+                if no is not None and int(no) == int(target_no):
+                    return d
+        if meta:
+            return sorted(meta, key=lambda x: x[2], reverse=True)[0][0]
+        return None
+
     best_root = None
     if args.best_root:
         best_root = Path(args.best_root).resolve()
@@ -203,10 +233,15 @@ def main() -> None:
     payload = json.loads(best_json.read_text())
 
     # --- Locate trial_dir ---
+    trial_dir = None
     trial_dir_str = payload.get("trial_dir")
-    if not trial_dir_str:
-        raise SystemExit("best_hparams.json is missing 'trial_dir' field.")
-    trial_dir = Path(trial_dir_str).resolve()
+    if trial_dir_str:
+        trial_dir = Path(trial_dir_str).resolve()
+    if trial_dir is None:
+        fallback_trial_dir = _resolve_trial_dir(best_root.parent, payload)
+        if fallback_trial_dir:
+            print(f"[train_from_best] Resolved trial_dir from job root: {fallback_trial_dir}")
+            trial_dir = fallback_trial_dir
 
     # HPO study name from the export payload (preferred over folder name)
     hpo_name = payload.get("study", {}).get("name")
@@ -222,7 +257,7 @@ def main() -> None:
 
 
     exported_cfg_path = best_root / "train_config_from_best.yaml"
-    merged_cfg_path = trial_dir / "train_config_merged.yaml"
+    merged_cfg_path = trial_dir / "train_config_merged.yaml" if trial_dir else None
 
     # --- Load base config ---
     if exported_cfg_path.is_file():
@@ -230,8 +265,12 @@ def main() -> None:
         print(f"[train_from_best] Using exported config: {exported_cfg_path}")
         best_params_applied = True
     else:
-        if not merged_cfg_path.is_file():
-            raise SystemExit(f"train_config_merged.yaml not found at {merged_cfg_path}")
+        if not merged_cfg_path or not merged_cfg_path.is_file():
+            raise SystemExit(
+                "Could not locate a training config to use. "
+                "Expected either train_config_from_best.yaml or a valid trial_dir/train_config_merged.yaml. "
+                "Re-run hpo_export_best.py to regenerate the best config."
+            )
         cfg = yaml.safe_load(merged_cfg_path.read_text())
         best_params_applied = False
 

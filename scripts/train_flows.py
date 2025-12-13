@@ -79,15 +79,22 @@ def _build_flow(cond_dim: int,
     layers = []
     for _ in range(num_layers):
         if transform.lower() == "spline":
+            # Prefer the spline module if available; fall back to autoregressive for older nflows layouts.
             try:
                 from nflows.transforms.spline import (
                     MaskedPiecewiseRationalQuadraticAutoregressiveTransform as SplineAR,
                 )
-            except ImportError as e:
-                raise SystemExit(
-                    "Spline transform requested but nflows spline module is missing. "
-                    "Install from source: pip install git+https://github.com/bayesiains/nflows"
-                ) from e
+            except ImportError:
+                try:
+                    from nflows.transforms.autoregressive import (
+                        MaskedPiecewiseRationalQuadraticAutoregressiveTransform as SplineAR,
+                    )
+                except ImportError as e:
+                    raise SystemExit(
+                        "Spline transform requested but nflows spline/autoregressive module with "
+                        "MaskedPiecewiseRationalQuadraticAutoregressiveTransform is missing. "
+                        "Install from source: pip install git+https://github.com/bayesiains/nflows"
+                    ) from e
             layers.append(
                 SplineAR(
                     features=1,
@@ -297,6 +304,29 @@ def main():
 
     cfg_path = Path(args.config).resolve()
     cfg = _load_cfg(cfg_path)
+
+    # Optional single-source pointer: if base_run_dir is set, infer missing base paths
+    base_run_dir_raw = cfg.get("base_run_dir")
+    if not base_run_dir_raw:
+        base_run_dir_raw = cfg.get("base_run", {}).get("run_dir")
+    if base_run_dir_raw:
+        base_run_dir = Path(base_run_dir_raw).expanduser().resolve()
+        cfg.setdefault("base_run", {})
+        for key, val in [
+            ("run_dir", str(base_run_dir)),
+            ("model_dir", str(base_run_dir)),
+            ("config_path", str(base_run_dir / "used_config.yaml")),
+            ("outdir", str(base_run_dir)),
+        ]:
+            if not cfg["base_run"].get(key):
+                cfg["base_run"][key] = val
+        # Also overwrite empty/placeholder values
+        for key in ("run_dir", "model_dir", "config_path", "outdir"):
+            if not cfg["base_run"].get(key):
+                cfg["base_run"][key] = str(base_run_dir if key not in ("config_path",) else base_run_dir / "used_config.yaml")
+        cfg.setdefault("base_artifacts", {})
+        if not cfg["base_artifacts"].get("preproc_meta_path"):
+            cfg["base_artifacts"]["preproc_meta_path"] = str(base_run_dir / "preproc_meta.json")
     cfg_outdir = cfg.get("io", {}).get("outdir")
 
     def _resolve_outdir(raw: str) -> Path:
@@ -340,6 +370,17 @@ def main():
 
     # --- Rebuild features with base encoders, load predictions per split
     base_meta_path = Path(cfg["base_artifacts"]["preproc_meta_path"]).resolve()
+    if base_meta_path.is_dir():
+        # Try to recover when the path was blank/dir by inferring from base_run_dir/model_dir
+        base_run_cfg = cfg.get("base_run", {}) or {}
+        cand_dir = base_run_cfg.get("run_dir") or base_run_cfg.get("model_dir")
+        if cand_dir:
+            cand = Path(cand_dir).expanduser().resolve() / "preproc_meta.json"
+            if cand.exists():
+                base_meta_path = cand
+                cfg["base_artifacts"]["preproc_meta_path"] = str(cand)
+    if not base_meta_path.exists() or base_meta_path.is_dir():
+        raise SystemExit(f"base_artifacts.preproc_meta_path is invalid: {base_meta_path}")
     meta = _load_preproc_meta(base_meta_path)
 
     X_all, _ = _build_features_from_meta(Path(cfg["data"]["csv_path"]).resolve(), meta)
