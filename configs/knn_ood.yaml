@@ -1,0 +1,28 @@
+run:
+  mode: "slurm"          # "local" or "slurm"
+  job_name: "knn_ood"
+  partition: "STUD"
+  time: "00:30:00"
+  mem_gb: 16
+  cpus: 4
+  gpus: 1
+  conda_env: null        # e.g., "thesis"; null = skip activation
+  logs_dir: "logs"
+
+knn_ood:
+  csv_path: "datasets/craigslist_cleaned_FULL.csv"
+  preproc_meta: "outputs/trainings/training_point_m/point_m_20251211-144003_292628/preproc_meta.json"
+  out_dir: "datasets/knn_ood"
+  out_prefix: "craigslist"
+
+  ref_split: "train"
+  candidate_split: "test"
+  ref_limit: null       # null = use all ref ids
+
+  proj_dim: 32
+  knn_k_list: [3, 5, 8, 12]
+  id_q: [0.0, 0.80]      # ID band (distance quantiles)
+  ood_q: [0.95, 1.0]     # hard OOD band
+
+  chunk_rows: 20000
+  seed: 1

@@ -1,0 +1,57 @@
+run:
+  mode: "slurm"          # set to "slurm" to submit each trial
+  job_name: "knn_ood"
+  partition: "STUD"
+  time: "00:30:00"
+  mem_gb: 16
+  cpus: 4
+  gpus: 1
+  conda_env: thesis      # set to your env name; null = skip activation
+  logs_dir: "logs"
+
+# Base settings shared by all trials; overridden per sweep entry below.
+knn_ood:
+  csv_path: "datasets/craigslist_cleaned_FULL.csv"
+  preproc_meta: "outputs/trainings/training_point_m/point_m_20251211-144003_292628/preproc_meta.json"
+  out_dir: "datasets"
+  out_prefix: "craigslist"
+  ref_split: "train"
+  candidate_split: "all"   # use all rows (train+val+test) as candidate pool
+  ref_limit: null         # use all reference rows
+  proj_dim: 32
+  # knn_k: 5               # optional single k
+  knn_k_list: [3, 5, 8, 12]
+  id_q: [0.0, 0.80]
+  ood_q: [0.99, 1.0]
+  chunk_rows: 80000      # larger chunks since using all rows
+  seed: 1
+
+# Sweep entries: override knn_ood keys per trial.
+sweep:
+  - name: "B"
+    knn_ood:
+      proj_dim: 64
+      knn_k_list: [3, 5, 8, 12]
+      id_q: [0.0, 0.80]
+      ood_q: [0.99, 1.0]
+
+  - name: "C"
+    knn_ood:
+      proj_dim: 64
+      knn_k_list: [3, 5, 8, 12]
+      id_q: [0.0, 0.80]
+      ood_q: [0.99, 1.0]
+
+  - name: "D"
+    knn_ood:
+      proj_dim: 96
+      knn_k_list: [3, 5, 8, 12]
+      id_q: [0.0, 0.80]
+      ood_q: [0.99, 1.0]
+
+  - name: "E"
+    knn_ood:
+      proj_dim: 128
+      knn_k_list: [3, 5, 8, 12]
+      id_q: [0.0, 0.80]
+      ood_q: [0.99, 1.0]

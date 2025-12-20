@@ -21,30 +21,50 @@
 
 settings:
   eval_root: outputs/evals
+  # Optional prefix added to discovered run directories (e.g., "point_<prefix>_*")
+  run_prefix: "_l"
   dido_mode: logistic
   n_mc_samples: 50
   n_ensemble_members: 10
   n_nf_samples: 200
-  large_error_quantile: 0.9
+  large_error_quantile: 0.95
 
 runs:
-  point_xs: null          # e.g. point_xs_20251210-184525_291935
-  lpl_xs: null            # e.g. lpl_xs_20251210-184537_291936
-  gau_xs: null            # e.g. gau_xs_20251210-184548_291937
-  esm_lpl_xs: null        # e.g. esm_laplace_lpl_xs_...
-  esm_gau_xs: null        # e.g. esm_gauss_gau_xs_...
-  nf_lpl_xs: null         # e.g. nf_lpl_xs_...
-  nf_gau_xs: null         # e.g. nf_gau_xs_...
-  dido_lpl_xs: null       # e.g. dido_lpl_xs_...
-  dido_gau_xs: null       # e.g. dido_gau_xs_...
+  point: null
+  laplace_analytic: null   # uses same eval dir as laplace_mc
+  laplace_mc: null
+  gauss_analytic: null     # uses same eval dir as gauss_mc
+  gauss_mc: null
+  laplace_ensemble: null
+  gauss_ensemble: null
+  nf_laplace: null
+  nf_gauss: null
+  dido_laplace: null
+  dido_gauss: null
 
 run_patterns:
-  point_xs: point_xs_*
-  lpl_xs: lpl_xs_*
-  gau_xs: gau_xs_*
-  esm_lpl_xs: esm_laplace_lpl_xs_*
-  esm_gau_xs: esm_gauss_gau_xs_*
-  nf_lpl_xs: nf_lpl_xs_*
-  nf_gau_xs: nf_gau_xs_*
-  dido_lpl_xs: dido_lpl_xs_*
-  dido_gau_xs: dido_gau_xs_*
+  point: point{prefix}*
+  laplace_analytic: lpl{prefix}*
+  laplace_mc: lpl{prefix}*
+  gauss_analytic: gau{prefix}*
+  gauss_mc: gau{prefix}*
+  laplace_ensemble: esm_laplace_lpl{prefix}*
+  gauss_ensemble: esm_gauss_gau{prefix}*
+  nf_laplace: nf_lpl{prefix}*
+  nf_gauss: nf_gau{prefix}*
+  dido_laplace: dido_lpl{prefix}*
+  dido_gauss: dido_gau{prefix}*
+
+# Method toggles (enable/disable analyses per family)
+enable_methods:
+  point: true
+  laplace_analytic: true
+  laplace_mc: true
+  gauss_analytic: true
+  gauss_mc: true
+  laplace_ensemble: false
+  gauss_ensemble: false
+  nf_laplace: false
+  nf_gauss: false
+  dido_laplace: false
+  dido_gauss: false

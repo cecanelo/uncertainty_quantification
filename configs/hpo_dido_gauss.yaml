@@ -1,11 +1,11 @@
 study:
-    name: "dido_gau_m"
+    name: "dido_gau_l"
     storage: "sqlite:///optuna_studies/hpo.db"
     direction: "minimize"
     resume: true
 
 budget:
-    n_trials: 25                # small run; increase for full HPO
+    n_trials: 50               # small run; increase for full HPO
 
 resources:
     partition: "STUD"
@@ -45,7 +45,7 @@ pruner:
         n_startup_trials: 15
 
 search_space:
-    - { name: "training.epochs",            dist: "choice", choices: [50] }
+    - { name: "training.epochs",            dist: "choice", choices: [100] }
     - { name: "binning.use_abs_error",      dist: "choice", choices: [true, false] }
     - { name: "binning.include_mu_as_feature", dist: "choice", choices: [true, false] }
     - { name: "model.hidden_dims",          dist: "choice", choices: [[128, 64], [256, 128], [256, 128, 64]] }

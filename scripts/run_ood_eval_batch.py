@@ -254,11 +254,9 @@ def main() -> None:
                 str(csv_path),
                 "--dataset-label",
                 ood_key,
-                "--split",
-                split,
             ]
             print(" ".join(cmd))
-            if args.dry-run:
+            if args.dry_run:
                 continue
 
             subprocess.run(cmd, check=True)

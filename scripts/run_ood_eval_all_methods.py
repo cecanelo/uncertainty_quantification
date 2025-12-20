@@ -76,22 +76,24 @@ def _regression_head_types(cfg: Dict[str, Any]) -> List[str]:
     return [str(h).lower() for h in m.get("head_types", ["point", "laplace", "gauss"])]
 
 
-def _discover_used_configs(roots: Iterable[Path], run_tag: str) -> List[Tuple[str, Path, Path]]:
-    """
-    Scan roots for run directories containing a used_config.yaml whose run
-    directory name includes run_tag. Returns a list of
-        (run_name, run_dir, used_config_path).
-    """
-    results: List[Tuple[str, Path, Path]] = []
+def _discover_used_configs(roots, run_tag):
+    results = []
     for root in roots:
         if not root.exists():
             continue
         for cfg_path in root.rglob("used_config.yaml"):
             run_dir = cfg_path.parent
-            name = run_dir.name
-            if run_tag and run_tag not in name:
+
+            # IMPORTANT: for ensembles, used_config.yaml lives in member_*
+            # so filter on the ensemble root name instead of "member_00".
+            effective_name = run_dir.name
+            if run_dir.name.startswith("member_"):
+                effective_name = run_dir.parent.name  # e.g. esm_gauss_gau_m_...
+
+            if run_tag and run_tag not in effective_name:
                 continue
-            results.append((name, run_dir, cfg_path))
+
+            results.append((effective_name, run_dir, cfg_path))
     return results
 
 
@@ -100,9 +102,9 @@ def _filter_regression_runs(
     head_types: List[str],
 ) -> List[Tuple[str, Path, Path]]:
     """
-    Keep only base/ensemble regression runs:
+    Keep only base regression runs (non-ensemble):
       - parent directory looks like training_point_*, training_lpl_*,
-        training_gau_*, or training_ensemble_*,
+        training_gau_*,
       - the config's model.head_type is in head_types.
     """
     import yaml as _yaml
@@ -111,7 +113,6 @@ def _filter_regression_runs(
         "training_point_",
         "training_lpl_",
         "training_gau_",
-        "training_ensemble_",
     )
     out: List[Tuple[str, Path, Path]] = []
     for name, run_dir, cfg_path in candidates:
@@ -126,6 +127,51 @@ def _filter_regression_runs(
         if ht not in head_types:
             continue
         out.append((name, run_dir, cfg_path))
+    return out
+
+
+def _filter_ensemble_runs(
+    candidates: List[Tuple[str, Path, Path]],
+    head_types: List[str],
+) -> List[Tuple[str, Path, Path]]:
+    """
+    Keep only ensemble runs (member_* dirs under an ensemble root).
+    We recognise two layouts:
+      - training_ensemble_*/member_*/used_config.yaml  (old)
+      - outputs/trainings/ensembles/esm_*/member_*/used_config.yaml (current)
+    We return a unique entry per ensemble root, normalising run_dir to the
+    ensemble folder (parent of member_*).
+    """
+    import yaml as _yaml
+
+    out: List[Tuple[str, Path, Path]] = []
+    seen_roots = set()
+    for name, run_dir, cfg_path in candidates:
+        parents = [p.name for p in run_dir.parents]
+        # Detect member_*; ensemble_root is its parent
+        if run_dir.name.startswith("member_"):
+            ensemble_root = run_dir.parent
+        else:
+            ensemble_root = run_dir
+
+        parent_names = {p.name for p in ensemble_root.parents}
+        if not (
+            any(p.startswith("training_ensemble_") for p in parent_names)
+            or ensemble_root.name.startswith("esm_")
+            or "ensembles" in parent_names
+        ):
+            continue
+        try:
+            cfg = _yaml.safe_load(cfg_path.read_text()) or {}
+            ht = str((cfg.get("model", {}) or {}).get("head_type", "")).lower()
+        except Exception:
+            ht = ""
+        if ht not in head_types:
+            continue
+        if ensemble_root in seen_roots:
+            continue
+        seen_roots.add(ensemble_root)
+        out.append((ensemble_root.name, ensemble_root, cfg_path))
     return out
 
 
@@ -300,13 +346,15 @@ def main() -> None:
         print("[info] No OOD sets enabled or found; nothing to do.")
         return
 
-    # ---------------- Regression (base + ensembles) ----------------
+    # ---------------- Regression (base deterministic + MC) ----------------
     if _method_enabled(cfg, "regression") and (not args.only_methods or "regression" in args.only_methods):
         reg_roots = _method_roots(cfg, "regression")
         candidates = _discover_used_configs(reg_roots, run_tag)
         reg_head_types = _regression_head_types(cfg)
         reg_runs = _filter_regression_runs(candidates, reg_head_types)
-        print(f"[discover][regression] {len(reg_runs)} runs for tag '{run_tag}'")
+        ens_runs = _filter_ensemble_runs(candidates, reg_head_types)
+        print(f"[discover][regression] {len(reg_runs)} base runs for tag '{run_tag}'")
+        print(f"[discover][ensembles] {len(ens_runs)} ensemble runs for tag '{run_tag}'")
 
         for run_name, run_dir, cfg_p in reg_runs:
             for ood_key, ood_csv in ood_specs:
@@ -316,6 +364,49 @@ def main() -> None:
                     "--config",
                     str(cfg_p),
                     "--outdir",
+                    str(run_dir),
+                    "--ood-csv",
+                    str(ood_csv),
+                    "--dataset-label",
+                    ood_key,
+                ]
+                print(" ".join(cmd))
+                if not args.dry_run:
+                    subprocess.run(cmd, check=True)
+
+                # MC-dropout OOD (if enabled in config)
+                try:
+                    cfg_tmp = _load_yaml(cfg_p)
+                    mc_cfg = (cfg_tmp.get("training", {}) or {}).get("mc_eval", {}) or {}
+                    head_type = str((cfg_tmp.get("model", {}) or {}).get("head_type", "")).lower()
+                    if mc_cfg.get("enabled", False) and head_type in ("gauss", "laplace"):
+                        cmd_mc = [
+                            sys.executable,
+                            "scripts/eval_regression_ood_mc.py",
+                            "--config",
+                            str(cfg_p),
+                            "--outdir",
+                            str(run_dir),
+                            "--ood-csv",
+                            str(ood_csv),
+                            "--dataset-label",
+                            ood_key,
+                        ]
+                        print(" ".join(cmd_mc))
+                        if not args.dry_run:
+                            subprocess.run(cmd_mc, check=True)
+                except Exception as e:
+                    print(f"[warn] skipping MC OOD for {run_dir}: {e}")
+
+        # Ensemble OOD aggregation
+        for run_name, run_dir, cfg_p in ens_runs:
+            for ood_key, ood_csv in ood_specs:
+                cmd = [
+                    sys.executable,
+                    "scripts/eval_ensemble_ood.py",
+                    "--config",
+                    str(cfg_p),
+                    "--ensemble-root",
                     str(run_dir),
                     "--ood-csv",
                     str(ood_csv),

@@ -12,34 +12,38 @@
 # (see below) and have a used_config.yaml. You can still use the
 # base_runs block if you ever want fully manual control.
 
-run_tag: "_m_"   # default tag for auto-discovery; can be overridden with --run-tag
+run_tag: "_l"   # default tag for auto-discovery; can be overridden with --run-tag
 
-base_runs: {}
+base_runs:
+  point_l:
+    enabled: true
+    config: outputs/trainings/training_point_l/point_l_20251220-010530_303656/used_config.yaml
+    outdir: outputs/trainings/training_point_l/point_l_20251220-010530_303656
+
+  lpl_l:
+    enabled: true
+    config: outputs/trainings/training_lpl_l/lpl_l_20251220-010458_303655/used_config.yaml
+    outdir: outputs/trainings/training_lpl_l/lpl_l_20251220-010458_303655
+
+  gau_l:
+    enabled: true
+    config: outputs/trainings/training_gau_l/gau_l_20251220-013128_303690/used_config.yaml
+    outdir: outputs/trainings/training_gau_l/gau_l_20251220-013128_303690
+
+  nf_lpl:
+    enabled: false
+  nf_gau:
+    enabled: false
+  dido_lpl:
+    enabled: false
+  dido_gau:
+    enabled: false
 
 ood_sets:
-  geo:
+  knn_hard:
     enabled: true
-    csv: datasets/craigslist_ood_geo_fl_tx.csv
+    csv: datasets/craigslist_ood_knn.csv
 
-  rare_manu:
-    enabled: true
-    csv: datasets/craigslist_ood_rare_manufacturers.csv
-
-  tail_mpy:
-    enabled: true
-    csv: datasets/craigslist_ood_tail_mpy_high.csv
-
-  tail_odo:
-    enabled: true
-    csv: datasets/craigslist_ood_tail_odo_high.csv
-
-  tail_year_old:
-    enabled: true
-    csv: datasets/craigslist_ood_tail_year_old.csv
-
-  tail_multi:
-    enabled: true
-    csv: datasets/craigslist_ood_tail_multi.csv
 
 options:
   # Which split name to record in the OOD prediction CSVs.

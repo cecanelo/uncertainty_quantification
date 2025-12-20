@@ -28,4 +28,4 @@ member_overrides:
 
 io:
   ensemble_root: "outputs/trainings/ensembles/{job}_{ts}_{jobid}"  # {job} already prefixed esm_<head>_
-  evals_root: "outputs/evals/{ensemble}"
+  evals_root: "outputs/evals"
