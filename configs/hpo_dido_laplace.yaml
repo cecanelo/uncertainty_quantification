@@ -29,7 +29,7 @@ base_config:
 trial_overrides:
     # Single source for the Laplace base run used by all DIDO trials in this study.
     # Update this path when you switch to a new Laplace base run.
-    base_run_dir: "/home/canelo/uncertainty_quantification/outputs/trainings/training_lpl_m/lpl_m_20251211-144033_292629"
+    base_run_dir: "/home/canelo/uncertainty_quantification/outputs/trainings/training_lpl_l/lpl_l_20251220-191248_303809"
     training:
         eval_after_train: false
 

@@ -176,8 +176,12 @@ def main() -> None:
     cfg = yaml.safe_load(batch_path.read_text()) or {}
     ood_sets = cfg.get("ood_sets", {}) or {}
     options = cfg.get("options", {}) or {}
+    eval_defaults = cfg.get("eval_defaults", {}) or {}
     split = options.get("split", "test")
     run_tag_cfg = cfg.get("run_tag")
+    mc_eval = bool(eval_defaults.get("mc_eval", False))
+    mc_samples = eval_defaults.get("mc_samples")
+    mc_save_samples = bool(eval_defaults.get("mc_save_samples", False))
 
     if not ood_sets:
         raise ValueError("No ood_sets defined in batch config.")
@@ -255,6 +259,12 @@ def main() -> None:
                 "--dataset-label",
                 ood_key,
             ]
+            if mc_eval:
+                cmd.append("--use-mc")
+            if mc_samples is not None:
+                cmd.extend(["--mc-samples", str(mc_samples)])
+            if mc_save_samples:
+                cmd.append("--mc-save-samples")
             print(" ".join(cmd))
             if args.dry_run:
                 continue

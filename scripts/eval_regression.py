@@ -90,6 +90,41 @@ def main():
     y = df[dc.target_col].astype(float).to_numpy()
     y_tr, y_meta = _target_transform(y, dc.target_transform)
 
+    # --- 2b) Guard against dataset drift (row count changed since training) ---
+    splits = meta["splits"]
+    n_rows = len(df)
+    out_of_bounds = any((len(v) and max(v) >= n_rows) for v in splits.values())
+
+    if out_of_bounds:
+        # If IDs are available, remap the stored split indices to current row positions via ID.
+        if meta.get("id_col") and meta.get("id_values") and "id" in df.columns:
+            id_to_row = {int(v): i for i, v in enumerate(df["id"].astype(int).to_numpy())}
+            id_values = meta["id_values"]
+            remapped = {}
+            dropped = {}
+            for split_name, idx_list in splits.items():
+                ids_split = [id_values[i] for i in idx_list]
+                new_idx, miss = [], 0
+                for rid in ids_split:
+                    pos = id_to_row.get(int(rid))
+                    if pos is None:
+                        miss += 1
+                    else:
+                        new_idx.append(pos)
+                remapped[split_name] = new_idx
+                dropped[split_name] = miss
+            splits = remapped
+            meta["splits"] = splits  # keep downstream bookkeeping consistent
+            print(
+                f"[eval] Detected split indices beyond current data rows (n={n_rows}); "
+                f"remapped by ID. Dropped missing IDs per split: {dropped}"
+            )
+        else:
+            raise IndexError(
+                "Split indices exceed current dataset length "
+                f"(n={n_rows}) and no ID mapping is available; dataset likely changed."
+            )
+
     # --- 3) Recreate features using stored encoders ---
     numeric_cols: List[str] = meta["numeric_cols"]
     onehot_cols: List[str] = meta["onehot_cols"]
@@ -99,7 +134,6 @@ def main():
     X = _apply_encoders(df, numeric_cols, onehot_cols, hash_cols, enc)
 
     # --- 4) Select the requested split indices ---
-    splits = meta["splits"]
     if args.split not in splits:
         raise KeyError(f"Split '{args.split}' not found in meta['splits']")
     idx = np.array(splits[args.split], dtype=int)

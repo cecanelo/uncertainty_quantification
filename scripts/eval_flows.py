@@ -247,7 +247,35 @@ def main() -> None:
 
     df_flow = df_flow.rename(columns={cols[0]: "y_true_t_raw", cols[1]: "mu_t_raw", cols[2]: "scale_t_raw"})
 
-    idx = df_flow[idx_col].astype(int).to_numpy()
+    idx_raw = pd.to_numeric(df_flow[idx_col], errors="coerce").to_numpy()
+    valid_idx = np.isfinite(idx_raw)
+    if not np.all(valid_idx):
+        df_flow = df_flow.loc[valid_idx].reset_index(drop=True)
+        idx_raw = idx_raw[valid_idx]
+    idx_raw = idx_raw.astype(int)
+
+    id_values = meta.get("id_values") if isinstance(meta, dict) else None
+    idx_row = idx_raw.copy()
+    id_out = idx_raw.copy()
+    if id_values is not None and len(id_values) > 0:
+        id_values = np.asarray(id_values)
+        if idx_raw.min() >= 0 and idx_raw.max() < len(id_values):
+            # Flow CSV likely stores row indices -> map to original ids for output.
+            idx_row = idx_raw
+            id_out = id_values[idx_raw]
+        else:
+            # Flow CSV likely stores original ids -> map to row indices for feature lookup.
+            id_index = pd.Index(id_values)
+            row_pos = id_index.get_indexer(idx_raw)
+            keep = row_pos >= 0
+            if not np.any(keep):
+                raise ValueError("No eval ids found in preproc_meta id_values; cannot map to rows.")
+            if not np.all(keep):
+                print(f"[warn] Dropping {np.sum(~keep)} eval rows not present in preproc_meta id_values.")
+            df_flow = df_flow.loc[keep].reset_index(drop=True)
+            idx_row = row_pos[keep]
+            id_out = idx_raw[keep]
+
     y_true_t = df_flow["y_true_t_raw"].to_numpy()
     mu_t = df_flow["mu_t_raw"].to_numpy()
     scale_t = df_flow["scale_t_raw"].to_numpy()
@@ -255,7 +283,7 @@ def main() -> None:
 
     z = (y_true_t - mu_t) / np.maximum(scale_t, 1e-8)
 
-    Xs = torch.tensor(X_all[idx], dtype=torch.float32)
+    Xs = torch.tensor(X_all[idx_row], dtype=torch.float32)
     zs = torch.tensor(z.reshape(-1, 1).astype(np.float32), dtype=torch.float32)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -300,7 +328,7 @@ def main() -> None:
             "z_raw",
             "log_prob_z_raw",
         ])
-        for rid, yt_o, mu_o, sig_o, z_i, lp in zip(idx, y_true_orig, mu_orig, sigma_ale_orig, z, log_prob_np):
+        for rid, yt_o, mu_o, sig_o, z_i, lp in zip(id_out, y_true_orig, mu_orig, sigma_ale_orig, z, log_prob_np):
             writer.writerow([
                 int(rid),
                 args.split,
@@ -314,14 +342,14 @@ def main() -> None:
 
     metrics = {
         "split": args.split,
-        "n": int(len(idx)),
+        "n": int(len(id_out)),
         "mean_nll": mean_nll,
         "head_type": head_type,
     }
     with (save_dir / "metrics.json").open("w") as f:
         json.dump(metrics, f, indent=2)
 
-    print(f"[eval_flows] split={args.split} n={len(idx)} mean_nll={mean_nll:.4f}")
+    print(f"[eval_flows] split={args.split} n={len(id_out)} mean_nll={mean_nll:.4f}")
     print(f"[eval_flows] wrote rows to: {out_csv}")
 
 

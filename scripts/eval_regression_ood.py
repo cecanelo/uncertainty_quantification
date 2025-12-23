@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
+import pandas as pd
 import torch
 import yaml
 
@@ -75,6 +76,10 @@ def _eval_single_ood(
     outdir: Path,
     ood_csv: Path,
     dataset_label: str,
+    *,
+    use_mc: bool = False,
+    mc_samples: int = 0,
+    mc_save_samples: bool = False,
 ) -> None:
     """
     Run the base model on a single OOD CSV and write ood_<label>_test.csv
@@ -133,32 +138,66 @@ def _eval_single_ood(
     targets: List[np.ndarray] = []
     nll_vals: List[float] = []
     scales: List[np.ndarray] = []
+    mc_mu_samples: List[np.ndarray] = []
+    mc_scale_samples: List[np.ndarray] = []
 
     with torch.no_grad():
         xb = X_split.to(device)
         yb = y_split.to(device)
-        out = model(xb)
 
-        mu = out["mu"]
-        preds.append(mu.detach().cpu().numpy())
-        targets.append(yb.detach().cpu().numpy())
+        if use_mc and mc_samples > 0 and head_type in ("gauss", "laplace"):
+            model.train()  # enable dropout for MC
+            for _ in range(mc_samples):
+                out = model(xb)
+                mu = out["mu"]
+                mc_mu_samples.append(mu.detach().cpu().numpy())
+                if head_type == "gauss":
+                    sigma = out["sigma"]
+                    mc_scale_samples.append(sigma.detach().cpu().numpy())
+                elif head_type == "laplace":
+                    b = out["b"]
+                    mc_scale_samples.append(b.detach().cpu().numpy())
+            model.eval()
 
-        if head_type == "gauss":
-            sigma = out["sigma"]
-            nll = gaussian_nll(mu, sigma, yb)
-            nll_vals.append(float(nll.item()))
-            scales.append(sigma.detach().cpu().numpy())
-        elif head_type == "laplace":
-            b = out["b"]
-            nll = laplace_nll(mu, b, yb)
-            nll_vals.append(float(nll.item()))
-            scales.append(b.detach().cpu().numpy())
+            mu_stack = np.stack(mc_mu_samples, axis=0)  # (mc, n, 1)
+            mu_mc_mean = mu_stack.mean(axis=0)
+            preds.append(mu_mc_mean)
+            targets.append(yb.detach().cpu().numpy())
+
+            # Deterministic forward pass (no dropout) for y_pred_det
+            out_det = model(xb)
+            mu_det = out_det["mu"].detach().cpu().numpy()  # (n,1)
+
+            # aleatoric: mean of scales; epistemic from std of mu
+            if mc_scale_samples:
+                scales_mean = np.mean(np.stack(mc_scale_samples, axis=0), axis=0)
+                scales.append(scales_mean)
+            # nll not well-defined for MC mixture -> skip
+        else:
+            model.eval()
+            out = model(xb)
+
+            mu = out["mu"]
+            preds.append(mu.detach().cpu().numpy())
+            targets.append(yb.detach().cpu().numpy())
+            mu_det = mu.detach().cpu().numpy()  # deterministic path (no MC)
+
+            if head_type == "gauss":
+                sigma = out["sigma"]
+                nll = gaussian_nll(mu, sigma, yb)
+                nll_vals.append(float(nll.item()))
+                scales.append(sigma.detach().cpu().numpy())
+            elif head_type == "laplace":
+                b = out["b"]
+                nll = laplace_nll(mu, b, yb)
+                nll_vals.append(float(nll.item()))
+                scales.append(b.detach().cpu().numpy())
 
     metrics = _metrics_from_batches(
         preds,
         targets,
         head_type,
-        nll_values=nll_vals,
+        nll_values=nll_vals if nll_vals else None,
         scales=scales if scales else None,
     )
 
@@ -170,6 +209,7 @@ def _eval_single_ood(
     yt_concat = np.concatenate(targets, axis=0).reshape(-1)
 
     mu_orig = inverse_target(mu_concat.reshape(-1, 1), y_meta).reshape(-1)
+    mu_det_orig = inverse_target(mu_det.reshape(-1, 1), y_meta).reshape(-1)
     yt_orig = inverse_target(yt_concat.reshape(-1, 1), y_meta).reshape(-1)
 
     ae_orig = np.abs(mu_orig - yt_orig)
@@ -202,36 +242,66 @@ def _eval_single_ood(
             sigma_z = np.sqrt(2.0) * sigma_z
     sigma_ale_orig = _delta_sigma_orig(head_type, sigma_z, mu_orig, y_meta)
 
-    header = [
-        "id",
-        "split",
-        "head_type",
-        "mc_flag",
-        "n_mc",
-        "y_true",
-        "y_pred_det",
-        "y_pred_mc_mean",
-        "sigma_ale_raw",
-        "sigma_epi_raw",
-    ]
+    # Align OOD schema with ID schema
+    mc_count = len(mc_mu_samples) if (use_mc and mc_mu_samples) else 0
+    mc_mu_orig_stack: Optional[np.ndarray] = None  # (mc, n) in original space
+    sigma_epi_orig: Optional[np.ndarray] = None
+
+    # If we ran MC, compute original-space sample stack once so that:
+    # - y_pred_mc_mean is the mean of y_pred_mc_* (in original space)
+    # - sigma_epi_orig is the stddev of y_pred_mc_* (in original space)
+    if mc_count:
+        mc_mu_orig_stack = np.stack(
+            [inverse_target(m.reshape(-1, 1), y_meta).reshape(-1) for m in mc_mu_samples],
+            axis=0,
+        )  # (mc, n)
+        sigma_epi_orig = mc_mu_orig_stack.std(axis=0)
+        mu_orig = mc_mu_orig_stack.mean(axis=0)
+        mc_count = int(mc_mu_orig_stack.shape[0])
+    if head_type == "point":
+        header = ["id", "split", "head_type", "y_true", "y_pred"]
+    else:
+        header = [
+            "id",
+            "split",
+            "head_type",
+            "mc_flag",
+            "n_mc",
+            "y_true",
+            "y_pred_det",
+            "y_pred_mc_mean",
+            "sigma_ale_orig",
+            "sigma_epi_orig",
+        ]
+        if mc_save_samples and mc_mu_orig_stack is not None:
+            for i in range(int(mc_mu_orig_stack.shape[0])):
+                header.append(f"y_pred_mc_{i+1}")
 
     with preds_path.open("w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(header)
-        for key, yt_o_i, mu_o_i, s_ale in zip(ids_split, yt_orig, mu_orig, sigma_ale_orig):
-            writer.writerow([
-                key,
-                "test",      # treated as test split
-                head_type,
-                0,
-                0,
-                float(yt_o_i),
-                float(mu_o_i),
-                float(mu_o_i),  # deterministic => mc mean = det pred
-                float(s_ale) if np.isfinite(s_ale) else np.nan,
-                np.nan,         # no epistemic here
-            ])
-
+        if head_type == "point":
+            for key, yt_o_i, mu_o_i in zip(ids_split, yt_orig, mu_orig):
+                writer.writerow([key, "test", head_type, float(yt_o_i), float(mu_o_i)])
+        else:
+            for idx_row, (key, yt_o_i, mu_mc_i, s_ale) in enumerate(zip(ids_split, yt_orig, mu_orig, sigma_ale_orig)):
+                mu_det_i = float(mu_det_orig[idx_row]) if head_type != "point" else float(mu_mc_i)
+                s_e = float(sigma_epi_orig[idx_row]) if sigma_epi_orig is not None else np.nan
+                row = [
+                    key,
+                    "test",
+                    head_type,
+                    1 if mc_count else 0,
+                    mc_count,
+                    float(yt_o_i),
+                    mu_det_i,
+                    float(mu_mc_i),
+                    float(s_ale) if np.isfinite(s_ale) else np.nan,
+                    s_e,
+                ]
+                if mc_save_samples and mc_mu_orig_stack is not None:
+                    row.extend(float(mc_mu_orig_stack[i][idx_row]) for i in range(mc_mu_orig_stack.shape[0]))
+                writer.writerow(row)
     print(f"[ood-eval] Saved OOD predictions to: {preds_path}")
 
 
@@ -255,6 +325,9 @@ def main() -> None:
     group.add_argument("--ood-csv", help="Single OOD CSV to evaluate")
     group.add_argument("--ood-dir", help="Directory containing multiple *_ood_*.csv files")
     ap.add_argument("--dataset-label", help="Label to use for this OOD set (only with --ood-csv)")
+    ap.add_argument("--use-mc", action="store_true", help="Enable MC sampling for gauss/laplace heads")
+    ap.add_argument("--mc-samples", type=int, default=0, help="Number of MC samples (if --use-mc)")
+    ap.add_argument("--mc-save-samples", action="store_true", help="If set, embed per-sample MC draws as extra columns")
     args = ap.parse_args()
 
     cfg_path = Path(args.config).resolve()
@@ -285,9 +358,17 @@ def main() -> None:
             ood_specs.append((p, _derive_label_from_name(p)))
 
     for ood_csv, label in ood_specs:
-        _eval_single_ood(cfg, meta, outdir, ood_csv, label)
+        _eval_single_ood(
+            cfg,
+            meta,
+            outdir,
+            ood_csv,
+            label,
+            use_mc=args.use_mc,
+            mc_samples=args.mc_samples,
+            mc_save_samples=args.mc_save_samples,
+        )
 
 
 if __name__ == "__main__":
     main()
-

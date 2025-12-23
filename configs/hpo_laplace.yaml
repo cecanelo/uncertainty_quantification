@@ -48,7 +48,7 @@ search_space:
     - { name: "training.grad_clip",   dist: "uniform", low: 0.0, high: 1.0, step: 0.1 }
     - { name: "model.hidden_dims",    dist: "choice",
         choices: [[256,256,128], [512,256,128], [512,512,256], [768,384,192]] }
-    - { name: "model.dropout",        dist: "uniform", low: 0.05, high: 0.30, step: 0.05 }
+    - { name: "model.dropout",        dist: "uniform", low: 0.4, high: 0.8, step: 0.05 }
     - { name: "model.activation",     dist: "choice", choices: ["relu","gelu","tanh"] }
     - { name: "data.batch_size",      dist: "choice", choices: [512, 1024] }
     - { name: "data.target_transform", dist: "choice", choices: ["none", "log1p"] }

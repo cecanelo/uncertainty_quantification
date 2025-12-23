@@ -389,6 +389,10 @@ def main() -> None:
 
         # Friendly prints
         print(f"[export] Best trial #{best.number} value={best.value:.6f}")
+        if payload.get("params"):
+            print("[export] Best hyperparameters:")
+            for key in sorted(payload["params"].keys()):
+                print(f"[export]   {key} = {payload['params'][key]}")
         print(f"[export] Wrote: {out1}")
         if latest_dir_template:
             print(f"[export] Also wrote: {out2}")

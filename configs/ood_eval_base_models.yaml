@@ -16,35 +16,50 @@ run_tag: "_l"   # default tag for auto-discovery; can be overridden with --run-t
 
 base_runs:
   point_l:
-    enabled: true
+    enabled: false
     config: outputs/trainings/training_point_l/point_l_20251220-010530_303656/used_config.yaml
     outdir: outputs/trainings/training_point_l/point_l_20251220-010530_303656
 
   lpl_l:
     enabled: true
-    config: outputs/trainings/training_lpl_l/lpl_l_20251220-010458_303655/used_config.yaml
-    outdir: outputs/trainings/training_lpl_l/lpl_l_20251220-010458_303655
+    config: outputs/trainings/training_lpl_l/lpl_l_20251220-191248_303809/used_config.yaml
+    outdir: outputs/trainings/training_lpl_l/lpl_l_20251220-191248_303809
 
   gau_l:
     enabled: true
-    config: outputs/trainings/training_gau_l/gau_l_20251220-013128_303690/used_config.yaml
-    outdir: outputs/trainings/training_gau_l/gau_l_20251220-013128_303690
+    config: outputs/trainings/training_gau_l/gau_l_20251220-192327_303825/used_config.yaml
+    outdir: outputs/trainings/training_gau_l/gau_l_20251220-192327_303825
 
   nf_lpl:
     enabled: false
+    config:
+    outdir:
+    
   nf_gau:
     enabled: false
+    config:
+    outdir:
+   
   dido_lpl:
     enabled: false
+    config:
+    outdir:
+   
   dido_gau:
     enabled: false
-
+    config:
+    outdir:
+   
 ood_sets:
   knn_hard:
     enabled: true
     csv: datasets/craigslist_ood_knn.csv
 
-
 options:
   # Which split name to record in the OOD prediction CSVs.
   split: test
+
+eval_defaults:
+  mc_eval: true        # whether to run MC/stochastic eval (adds sigma_epi_raw)
+  mc_samples: 50
+  mc_save_samples: true  # when true, also save per-sample MC draws (mu_s*, sigma_s*)

@@ -10,7 +10,7 @@ budget:
 resources:
     partition: "STUD"
     time: "00:50:00"
-    mem_gb: 16
+    mem_gb: 32
     cpus_per_task: 4
     gpus: 1
     conda_env: "thesis"
@@ -28,7 +28,7 @@ base_config:
 
 trial_overrides:
     # Single source: Laplace base run used by all NF Laplace trials in this study.
-    base_run_dir: "/home/canelo/uncertainty_quantification/outputs/trainings/training_lpl_m/lpl_m_20251211-144033_292629"
+    base_run_dir: "/home/canelo/uncertainty_quantification/outputs/trainings/training_lpl_l/lpl_l_20251220-191248_303809"
     evaluation:
         after_train: false
 

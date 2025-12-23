@@ -1,4 +1,4 @@
-base_config: "/home/canelo/uncertainty_quantification/outputs/trainings/training_gau_m/gau_m_20251211-144045_292630/used_config.yaml"
+base_config: "/home/canelo/uncertainty_quantification/outputs/trainings/training_gau_l/gau_l_20251220-192327_303825/used_config.yaml"
 
 run:
   mode: "slurm"
@@ -11,7 +11,7 @@ slurm:
   gpus: 1
   job_name: "esm"   # will be prefixed esm_<head>_ automatically
   conda_env: "thesis"
-  max_parallel: 4
+  max_parallel: 5
 
 ensemble:
   n_members: 10

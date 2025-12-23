@@ -30,17 +30,17 @@ settings:
   large_error_quantile: 0.95
 
 runs:
-  point: null
-  laplace_analytic: null   # uses same eval dir as laplace_mc
-  laplace_mc: null
-  gauss_analytic: null     # uses same eval dir as gauss_mc
-  gauss_mc: null
-  laplace_ensemble: null
-  gauss_ensemble: null
-  nf_laplace: null
-  nf_gauss: null
-  dido_laplace: null
-  dido_gauss: null
+  point: outputs/evals/point_l_20251220-010530_303656
+  laplace_analytic: outputs/evals/lpl_l_20251220-191248_303809   # uses same eval dir as laplace_mc
+  laplace_mc: outputs/evals/lpl_l_20251220-191248_303809
+  gauss_analytic: outputs/evals/gau_l_20251220-192327_303825    # uses same eval dir as gauss_mc
+  gauss_mc: outputs/evals/gau_l_20251220-192327_303825
+  laplace_ensemble: outputs/evals/esm_laplace_lpl_l_20251221-004022_304164
+  gauss_ensemble: outputs/evals/esm_gauss_gau_l_20251221-004030_304170
+  nf_laplace: outputs/evals/nf_lpl_l_20251221-222438_304508
+  nf_gauss: outputs/evals/nf_gau_l_20251221-204946_304381
+  dido_laplace: outputs/evals/dido_lpl_l_20251221-004441_304174
+  dido_gauss: outputs/evals/dido_gau_l_20251221-004536_304175
 
 run_patterns:
   point: point{prefix}*
@@ -62,9 +62,9 @@ enable_methods:
   laplace_mc: true
   gauss_analytic: true
   gauss_mc: true
-  laplace_ensemble: false
-  gauss_ensemble: false
-  nf_laplace: false
-  nf_gauss: false
-  dido_laplace: false
-  dido_gauss: false
+  laplace_ensemble: true
+  gauss_ensemble: true
+  nf_laplace: true
+  nf_gauss: true
+  dido_laplace: true
+  dido_gauss: true
