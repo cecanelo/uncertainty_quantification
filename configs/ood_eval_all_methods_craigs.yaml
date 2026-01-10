@@ -1,0 +1,38 @@
+# kNN-only OOD evaluation config for Craigslist runs.
+
+run_tag: "_l_"  # substring used to select runs, e.g., "_m_", "_l_"
+
+methods:
+  regression:
+    enabled: true
+    roots:
+      - outputs/trainings
+      - outputs/trainings/ensembles
+    head_types: ["point", "laplace", "gauss"]
+
+  nf:
+    enabled: false
+    roots:
+      - outputs/trainings
+
+  dido:
+    enabled: false
+    roots:
+      - outputs/trainings
+
+ood_sets:
+  knn:
+    enabled: true
+    csv: datasets/knn_ood/craigs_ood_knn.csv
+
+options:
+  split: test
+
+slurm:
+  partition: STUD
+  time: "00:50:00"
+  mem_gb: 16
+  cpus: 1
+  gpus: 1
+  job_name: "ood_all_craigs"
+  conda_env: "thesis"

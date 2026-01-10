@@ -1,15 +1,15 @@
 study:
-    name: "lpl_l"
+    name: "lpl_xs_vw"
     storage: "sqlite:///optuna_studies/hpo.db"
     direction: "minimize"
     resume: true
 
 budget:
-    n_trials: 50                # tiny run on TEST; increase for full HPO
+    n_trials: 8                 # small XS smoke run
 
 resources:
     partition: "STUD"          # small queue for quick runs
-    time: "00:50:00"
+    time: "00:20:00"
     mem_gb: 16
     cpus_per_task: 4
     gpus: 1
@@ -27,8 +27,15 @@ base_config:
     train_script_path: "scripts/train_regression.py"
 
 trial_overrides:
+    dataset: "vw"
     training:
         eval_after_train: false
+        mc_eval:
+            enabled: false
+        early_stopping:
+            enabled: false
+    ensemble:
+        enabled: false
 
 repro:
     snapshot_hpo_config: true
@@ -42,16 +49,16 @@ pruner:
         n_startup_trials: 15
 
 search_space:
-    - { name: "training.epochs",      dist: "choice", choices: [100] }
+    - { name: "training.epochs",      dist: "choice", choices: [5] }
     - { name: "training.lr",          dist: "loguniform", low: 1.0e-4, high: 3.0e-3 }
     - { name: "training.weight_decay",dist: "loguniform", low: 1.0e-6, high: 1.0e-2 }
     - { name: "training.grad_clip",   dist: "uniform", low: 0.0, high: 1.0, step: 0.1 }
     - { name: "model.hidden_dims",    dist: "choice",
         choices: [[256,256,128], [512,256,128], [512,512,256], [768,384,192]] }
-    - { name: "model.dropout",        dist: "uniform", low: 0.4, high: 0.8, step: 0.05 }
+    - { name: "model.dropout",        dist: "uniform", low: 0.0, high: 0.3, step: 0.05 }
     - { name: "model.activation",     dist: "choice", choices: ["relu","gelu","tanh"] }
     - { name: "data.batch_size",      dist: "choice", choices: [512, 1024] }
-    - { name: "data.target_transform", dist: "choice", choices: ["none", "log1p"] }
+    - { name: "data.target_transform", dist: "choice", choices: ["none"] }
 
 post_run:
     export_best: true
@@ -61,4 +68,8 @@ post_run:
     train_overrides:
         training:
             eval_after_train: true
+            mc_eval:
+                enabled: false
+            early_stopping:
+                enabled: false
     latest_pointer_dir: "outputs/best_hparams/{study}"

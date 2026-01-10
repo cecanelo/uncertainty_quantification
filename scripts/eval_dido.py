@@ -19,6 +19,12 @@ import torch
 import yaml
 
 from data import DataConfig, _prepare_frame
+# Allow both package and script-level import
+try:
+    from .config_resolver import load_and_resolve_config  # type: ignore
+except Exception:
+    from config_resolver import load_and_resolve_config  # type: ignore
+from config_resolver import load_and_resolve_config
 
 
 def _load_preproc_meta(meta_path: Path) -> dict:
@@ -113,7 +119,7 @@ def _ensure_preds(split: str, cfg: dict, run_cfg: dict) -> Path:
     if base_cfg_path is None or base_model_dir is None:
         raise FileNotFoundError("base_run.config_path or base_run.model_dir missing for auto_create")
 
-    base_cfg = yaml.safe_load(base_cfg_path.read_text())
+    base_cfg = load_and_resolve_config(base_cfg_path)
     evals_root = base_cfg.get("io", {}).get("evals_root", "outputs/evals")
     # match eval_regression convention: use model_dir name as run tag
     run_tag = base_model_dir.name if base_model_dir is not None else base_cfg.get("slurm", {}).get("job_name", "run")
@@ -278,7 +284,7 @@ def main() -> None:
         base_cfg_path = Path(base_run.get("config_path", "")) if base_run.get("config_path") else None
         if base_cfg_path is not None and base_cfg_path.exists():
             try:
-                base_cfg = yaml.safe_load(base_cfg_path.read_text())
+                base_cfg = load_and_resolve_config(base_cfg_path)
                 base_head_type = (base_cfg.get("model", {}) or {}).get("head_type", None)
             except Exception:
                 base_head_type = None

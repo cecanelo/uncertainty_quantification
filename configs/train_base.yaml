@@ -9,6 +9,8 @@ slurm:
     conda_env: "thesis"
     max_parallel: 4  
 
+dataset: "craigs"
+
 data:
     csv_path: "/home/canelo/uncertainty_quantification/datasets/craigslist_cleaned.csv"
     target_col: "price"

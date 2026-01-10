@@ -1,0 +1,32 @@
+# kNN OOD split config for the Craigslist dataset.
+# NOTE: update `preproc_meta` to point to the preproc_meta.json from the
+#       Craigslist base training run you want to mirror.
+
+run:
+  mode: "local"         # "local" or "slurm"
+  job_name: "knn_ood_craigs"
+  partition: "STUD"
+  time: "00:30:00"
+  mem_gb: 16
+  cpus: 4
+  gpus: 0
+  conda_env: null
+  logs_dir: "logs"
+
+knn_ood:
+  csv_path: "datasets/craigslist_cleaned_FULL.csv"
+  preproc_meta: outputs/trainings/training_point_smoke/craigs_smoke_503683/preproc_meta.json  # <-- replace with actual path
+  out_dir: "datasets/knn_ood"
+  out_prefix: "craigs"
+
+  ref_split: "train"
+  candidate_split: "test"
+  ref_limit: null
+
+  proj_dim: 32
+  knn_k_list: [3, 5, 8, 12]
+  id_q: [0.0, 0.80]      # ID band (distance quantiles)
+  ood_q: [0.95, 1.0]     # hard OOD band
+
+  chunk_rows: 20000
+  seed: 1

@@ -32,6 +32,11 @@ import torch
 import yaml
 
 from data import DataConfig, _prepare_frame
+# Allow both package and script-level import
+try:
+    from .config_resolver import load_and_resolve_config  # type: ignore
+except Exception:
+    from config_resolver import load_and_resolve_config  # type: ignore
 from eval_dido import _load_preproc_meta, DirichletNet
 
 
@@ -113,7 +118,7 @@ def main() -> None:
     if not cfg_path.exists() or not model_path.exists():
         raise SystemExit("DIDO run is missing used_config.yaml or model.pt")
 
-    cfg = yaml.safe_load(cfg_path.read_text())
+    cfg = load_and_resolve_config(cfg_path)
     run_meta = json.loads(run_meta_path.read_text()) if run_meta_path.exists() else {}
 
     bin_cfg = run_meta.get("binning", cfg.get("binning", {}))
@@ -142,7 +147,7 @@ def main() -> None:
     if not base_cfg_path.exists() or not base_model_dir.exists():
         raise SystemExit("DIDO config base_run.config_path or base_run.model_dir is missing/invalid.")
 
-    base_cfg = yaml.safe_load(base_cfg_path.read_text())
+    base_cfg = load_and_resolve_config(base_cfg_path)
     evals_root = base_cfg.get("io", {}).get("evals_root", "outputs/evals")
     run_tag_base = base_model_dir.name
 

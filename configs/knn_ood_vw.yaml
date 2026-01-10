@@ -1,0 +1,32 @@
+# kNN OOD split config for the VW (rv_2024) dataset.
+# NOTE: update `preproc_meta` to point to the preproc_meta.json from the
+#       VW base training run you want to mirror.
+
+run:
+  mode: "slurm"         # "local" or "slurm"
+  job_name: "knn_ood_vw"
+  partition: "STUD"
+  time: "00:30:00"
+  mem_gb: 16
+  cpus: 4
+  gpus: 0
+  conda_env: "thesis"
+  logs_dir: "logs"
+
+knn_ood:
+  csv_path: "datasets/rv_dataset_2024.csv"
+  preproc_meta: "outputs/trainings/training_lpl_xs_vw/lpl_xs_vw_20260110-175325_505269/preproc_meta.json"
+  out_dir: "datasets/knn_ood"
+  out_prefix: "vw"
+
+  ref_split: "train"
+  candidate_split: "test"
+  ref_limit: null
+
+  proj_dim: 32
+  knn_k_list: [3, 5, 8, 12]
+  id_q: [0.0, 0.80]      # ID band (distance quantiles)
+  ood_q: [0.95, 1.0]     # hard OOD band
+
+  chunk_rows: 20000
+  seed: 1

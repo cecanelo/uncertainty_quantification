@@ -8,8 +8,10 @@ slurm:
   gpus: 1
   job_name: "nf_gau"
   conda_env: "thesis"
+dataset: "craigs"
+
 data:
-  csv_path: "/home/canelo/uncertainty_quantification/datasets/craigslist_cleaned.csv"
+    csv_path: "/home/canelo/uncertainty_quantification/datasets/craigslist_cleaned.csv"
 
 # Single source: set base_run_dir to the Gaussian base run; other paths will be inferred.
 base_run_dir: ""

@@ -41,6 +41,10 @@ from data import DataConfig, _prepare_frame, _apply_encoders, _target_transform,
 from model_base import MLPRegressor, gaussian_nll, laplace_nll
 from train_regression import _load_cfg as _load_base_cfg
 from train_flows import _build_flow, _load_cfg as _load_nf_cfg
+try:
+    from .config_resolver import load_and_resolve_config  # type: ignore
+except Exception:
+    from config_resolver import load_and_resolve_config  # type: ignore
 
 
 def _load_preproc_meta(meta_path: Path) -> dict:
@@ -326,4 +330,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

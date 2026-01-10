@@ -11,8 +11,30 @@ import torch.optim as optim
 import torch.nn as nn
 import yaml
 
-from data import get_dataloaders, inverse_target, _prepare_frame, _apply_encoders, DataConfig, _target_transform
-from model_base import MLPRegressor, mse_loss, mae_loss, huber_loss, gaussian_nll, laplace_nll
+# Allow both package and script-level import
+try:
+    from .config_resolver import load_and_resolve_config  # type: ignore
+except Exception:
+    from config_resolver import load_and_resolve_config  # type: ignore
+
+# Allow both package and script-level import for data helpers
+try:
+    from .data import (
+        get_dataloaders,
+        inverse_target,
+        _prepare_frame,
+        _apply_encoders,
+        DataConfig,
+        _target_transform,
+    )  # type: ignore
+except Exception:
+    from data import get_dataloaders, inverse_target, _prepare_frame, _apply_encoders, DataConfig, _target_transform  # type: ignore
+
+# Allow both package and script-level import for model_base
+try:
+    from .model_base import MLPRegressor, mse_loss, mae_loss, huber_loss, gaussian_nll, laplace_nll  # type: ignore
+except Exception:
+    from model_base import MLPRegressor, mse_loss, mae_loss, huber_loss, gaussian_nll, laplace_nll  # type: ignore
 
 def set_seed(seed: int):
     import random
@@ -20,8 +42,7 @@ def set_seed(seed: int):
     torch.backends.cudnn.deterministic = True; torch.backends.cudnn.benchmark = False
 
 def _load_cfg(path: str) -> Dict[str, Any]:
-    with open(path, "r") as f:
-        return yaml.safe_load(f)
+    return load_and_resolve_config(path)
 
 def _resolve_outdir(raw: str, cfg: Dict[str, Any]) -> Path:
     """
@@ -29,11 +50,18 @@ def _resolve_outdir(raw: str, cfg: Dict[str, Any]) -> Path:
       {job}   -> slurm.job_name if present else cfg['model'].get('head_type','run')
       {ts}    -> current timestamp
       {jobid} -> SLURM_JOB_ID env if present else NA
+      {dataset} -> dataset key if present
     """
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
     jobid_env = os.environ.get("SLURM_JOB_ID", "NA")
     job_name = cfg.get("slurm", {}).get("job_name") or cfg.get("objective") or cfg.get("head_type") or "run"
+    dataset = cfg.get("dataset") or (cfg.get("data") or {}).get("dataset") or ""
     filled = raw.replace("{job}", str(job_name)).replace("{ts}", ts).replace("{jobid}", jobid_env)
+    filled = filled.replace("{dataset}", dataset or "ds")
+    # If no dataset placeholder was provided, append it to the leaf to avoid mixing runs.
+    if dataset and "{dataset}" not in raw:
+        p = Path(filled)
+        filled = str(p.parent / f"{dataset}_{p.name}")
     return Path(filled).resolve()
 
 def _objective_name(cfg: Dict[str, Any]) -> str:

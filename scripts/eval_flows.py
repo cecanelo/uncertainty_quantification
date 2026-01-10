@@ -42,13 +42,17 @@ import torch
 import yaml
 
 from data import inverse_target
+# Allow both package and script-level import
+try:
+    from .config_resolver import load_and_resolve_config  # type: ignore
+except Exception:
+    from config_resolver import load_and_resolve_config  # type: ignore
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _load_yaml(path: Path) -> Dict[str, Any]:
-    with path.open("r") as f:
-        return yaml.safe_load(f)
+    return load_and_resolve_config(path)
 
 
 def _load_preproc_meta(meta_path: Path) -> dict:

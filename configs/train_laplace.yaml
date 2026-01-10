@@ -9,6 +9,8 @@ slurm:
     job_name: "laplace"
     conda_env: "thesis"
 
+dataset: "craigs"
+
 data:
     csv_path: "/home/canelo/uncertainty_quantification/datasets/craigslist_cleaned.csv"
     target_col: "price"

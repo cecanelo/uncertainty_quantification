@@ -33,8 +33,22 @@ import pandas as pd
 import torch
 import yaml
 
-from data import DataConfig, _prepare_frame, _apply_encoders, _target_transform, inverse_target
-from model_base import MLPRegressor, gaussian_nll, laplace_nll
+# Allow both package and script-level import
+try:
+    from .config_resolver import load_and_resolve_config  # type: ignore
+except Exception:
+    from config_resolver import load_and_resolve_config  # type: ignore
+
+try:
+    from .data import DataConfig, _prepare_frame, _apply_encoders, _target_transform, inverse_target  # type: ignore
+except Exception:
+    from data import DataConfig, _prepare_frame, _apply_encoders, _target_transform, inverse_target  # type: ignore
+
+try:
+    from .model_base import MLPRegressor, gaussian_nll, laplace_nll  # type: ignore
+except Exception:
+    from model_base import MLPRegressor, gaussian_nll, laplace_nll  # type: ignore
+
 from train_regression import _metrics_from_batches, _load_cfg
 
 

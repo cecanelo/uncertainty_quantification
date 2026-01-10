@@ -47,6 +47,11 @@ class DataConfig:
     hash_cols: Optional[List[str]] = None
     hash_dims: Optional[Dict[str, int]] = None
 
+    # Preprocessing controls
+    drop_cols: Optional[List[str]] = None
+    drop_unnamed_index_cols: bool = False
+    dataset: Optional[str] = None  # logical dataset key (e.g., craigs / vw)
+
     # Loader
     batch_size: int = 2048
     num_workers: int = 4
@@ -72,6 +77,20 @@ def _prepare_frame(cfg: DataConfig) -> pd.DataFrame:
     if not path.exists():
         raise FileNotFoundError(f"CSV not found: {path}")
     df = pd.read_csv(path)
+
+    # --- dataset-aware cleanup ---
+    dropped_cols: List[str] = []
+    if cfg.drop_unnamed_index_cols:
+        for col in list(df.columns):
+            if col == "" or col.startswith("Unnamed:"):
+                df = df.drop(columns=[col])
+                dropped_cols.append(col)
+    if cfg.drop_cols:
+        for col in cfg.drop_cols:
+            if col in df.columns:
+                df = df.drop(columns=[col])
+                dropped_cols.append(col)
+
     # basic coercions
     if "lat" in df.columns:
         df["lat"] = df["lat"].map(_to_float)
@@ -94,6 +113,9 @@ def _prepare_frame(cfg: DataConfig) -> pd.DataFrame:
     except Exception:
         # be robust to odd schemas; just skip derived features if anything goes wrong
         pass
+
+    # stash list of columns we removed for meta/debug
+    df.attrs["dropped_cols"] = dropped_cols
 
     return df
 
@@ -228,6 +250,10 @@ def get_dataloaders(train_cfg: Dict, seed: int = 42):
         "onehot_cols": onehot_cols,
         "hash_cols": hash_cols,
         "hash_dims": hash_dims,
+        "dataset": dc.dataset,
+        "csv_path": str(Path(dc.csv_path).resolve()),
+        "target_col": dc.target_col,
+        "dropped_cols": df.attrs.get("dropped_cols", []),
     }
 
     # If an 'id' column exists, record it so evaluation can join on it later

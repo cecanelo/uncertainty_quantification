@@ -12,6 +12,11 @@ import torch
 import torch.optim as optim
 import yaml
 from data import DataConfig, _prepare_frame
+# Allow both package and script-level import
+try:
+    from .config_resolver import load_and_resolve_config  # type: ignore
+except Exception:
+    from config_resolver import load_and_resolve_config  # type: ignore
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -41,8 +46,7 @@ def _infer_head_type(cfg: dict) -> str:
 
 # ----------------------------- util -----------------------------
 def _load_cfg(p: str | Path) -> Dict[str, Any]:
-    with open(p, "r") as f:
-        return yaml.safe_load(f)
+    return load_and_resolve_config(p)
 
 def _save_yaml(obj: Dict[str, Any], path: Path) -> None:
     with open(path, "w") as f:

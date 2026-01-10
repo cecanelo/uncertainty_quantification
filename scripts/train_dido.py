@@ -23,6 +23,11 @@ import torch.optim as optim
 import yaml
 
 from data import DataConfig, _prepare_frame
+# Allow both package and script-level import
+try:
+    from .config_resolver import load_and_resolve_config  # type: ignore
+except Exception:
+    from config_resolver import load_and_resolve_config  # type: ignore
 
 
 # ---------------------- small utilities ----------------------
@@ -218,7 +223,7 @@ def _ensure_preds(split: str, base_preds_cfg: dict, auto_create: bool, base_cfg_
         raise FileNotFoundError(f"Base preds for split '{split}' not found and auto_create=False")
     if base_cfg_path is None or base_model_dir is None:
         raise FileNotFoundError("base_run.config_path or base_run.model_dir missing for auto_create")
-    base_cfg = yaml.safe_load(base_cfg_path.read_text())
+    base_cfg = load_and_resolve_config(base_cfg_path)
     evals_root = base_cfg.get("io", {}).get("evals_root", "outputs/evals")
     # Prefer the actual model_dir name (matches eval_regression convention), fall back to job_name
     run_tag = base_model_dir.name if base_model_dir is not None else base_cfg.get("slurm", {}).get("job_name", "run")
@@ -249,7 +254,7 @@ def main() -> None:
     ap.add_argument("--mode", choices=["local", "slurm"], default="local", help="local or slurm submission")
     args = ap.parse_args()
 
-    cfg = yaml.safe_load(Path(args.config).read_text())
+    cfg = load_and_resolve_config(args.config)
     raw_outdir = args.outdir or cfg.get("io", {}).get("outdir")
     if not raw_outdir:
         raise SystemExit("Please specify an outdir via --outdir or io.outdir in the config.")
@@ -313,7 +318,7 @@ def main() -> None:
     base_head_type = None
     if base_cfg_path is not None and base_cfg_path.exists():
         try:
-            _base_cfg = yaml.safe_load(base_cfg_path.read_text())
+            _base_cfg = load_and_resolve_config(base_cfg_path)
             base_head_type = (_base_cfg.get("model", {}) or {}).get("head_type")
         except Exception:
             base_head_type = None
