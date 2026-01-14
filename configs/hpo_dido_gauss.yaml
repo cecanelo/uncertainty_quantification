@@ -1,16 +1,16 @@
 study:
-    name: "dido_gau_l"
+    name: "dido_gau_l_craigs"
     storage: "sqlite:///optuna_studies/hpo.db"
     direction: "minimize"
     resume: true
 
 budget:
-    n_trials: 50               # small run; increase for full HPO
+    n_trials: 50              # match Craigs L
 
 resources:
     partition: "STUD"
     time: "00:50:00"
-    mem_gb: 32
+    mem_gb: 64
     cpus_per_task: 4
     gpus: 1                    # CPU is fine for small DIDO; set to 1 if you prefer GPU
     conda_env: "thesis"
@@ -27,9 +27,15 @@ base_config:
     train_script_path: "scripts/train_dido.py"
 
 trial_overrides:
-    # Single source for the Laplace base run used by all DIDO trials in this study.
-    # Update this path when you switch to a new Laplace base run.
-    base_run_dir: "/home/canelo/uncertainty_quantification/outputs/trainings/training_gau_l/gau_l_20251220-192327_303825"
+    # Single source for the Gauss base run used by all DIDO trials in this study.
+    # Update this path when you switch to a new Gauss base run.
+    base_run_dir: "/home/canelo/uncertainty_quantification/outputs/trainings/training_gau_l_craigs/gau_l_craigs_20260112-204108_507268"
+    dataset: "craigs"
+    base_preds:
+        auto_create: true
+        train_csv: ""
+        val_csv: ""
+        test_csv: ""
     training:
         eval_after_train: false
 

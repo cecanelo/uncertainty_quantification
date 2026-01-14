@@ -35,13 +35,14 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Dict, Any, Tuple
+from datetime import datetime
 
 import numpy as np
 import pandas as pd
 import torch
 import yaml
 
-from data import inverse_target
+from data import inverse_target, DataConfig, _prepare_frame
 # Allow both package and script-level import
 try:
     from .config_resolver import load_and_resolve_config  # type: ignore
@@ -69,12 +70,28 @@ def _to_float(s):
         return np.nan
 
 
-def _build_features_from_meta(csv_path: Path, meta: dict) -> Tuple[np.ndarray, np.ndarray, dict]:
-    df = pd.read_csv(csv_path)
-    if "lat" in df.columns:
-        df["lat"] = df["lat"].map(_to_float)
-    if "long" in df.columns:
-        df["long"] = df["long"].map(_to_float)
+def _set_seed(seed: int | None) -> None:
+    if seed is None:
+        return
+    import random
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+
+def _build_features_from_meta(csv_path: Path, meta: dict, cfg_data: dict | None = None) -> Tuple[np.ndarray, np.ndarray, dict]:
+    # Use the same preprocessing path as training to ensure derived features match.
+    cfg_data = cfg_data or {}
+    dc = DataConfig(
+        csv_path=str(csv_path),
+        target_col=str(meta.get("target_col") or cfg_data.get("target_col") or "price"),
+        drop_cols=list(meta.get("dropped_cols") or cfg_data.get("drop_cols") or []),
+        drop_unnamed_index_cols=bool(cfg_data.get("drop_unnamed_index_cols", False)),
+        dataset=meta.get("dataset") or cfg_data.get("dataset"),
+    )
+    df = _prepare_frame(dc)
 
     enc = meta["encoders"]
     numeric_cols = meta.get("numeric_cols", [])
@@ -139,6 +156,35 @@ def _delta_sigma_orig(head_type: str, sigma_z: np.ndarray | None, mu_orig: np.nd
     return sigma_z
 
 
+def _sample_z_std(
+    flow: torch.nn.Module,
+    Xs: torch.Tensor,
+    *,
+    n_samples: int,
+    batch_size: int,
+    device: torch.device,
+) -> np.ndarray:
+    if n_samples <= 0:
+        return np.full((Xs.shape[0],), np.nan, dtype=np.float32)
+    n = Xs.shape[0]
+    out = np.empty(n, dtype=np.float32)
+    for i in range(0, n, batch_size):
+        xb = Xs[i : i + batch_size].to(device)
+        samples = flow.sample(n_samples, context=xb)
+        if samples.dim() == 3:
+            if samples.shape[0] == n_samples:
+                std = samples.std(dim=0, unbiased=False)
+            elif samples.shape[1] == n_samples:
+                std = samples.std(dim=1, unbiased=False)
+            else:
+                std = samples.std(dim=0, unbiased=False)
+        else:
+            std = torch.zeros((samples.shape[0], 1), device=samples.device)
+        std = std.squeeze(-1).detach().cpu().numpy()
+        out[i : i + len(std)] = std
+    return out
+
+
 def _ensure_flow_csv(split: str, cfg: dict, flow_outdir: Path) -> Path:
     base_preds = cfg.get("base_preds", {}) or {}
     key = f"{split}_csv"
@@ -178,15 +224,98 @@ def _ensure_flow_csv(split: str, cfg: dict, flow_outdir: Path) -> Path:
     return p
 
 
+def submit_slurm(
+    cfg_path: Path,
+    outdir: Path,
+    split: str,
+    save_dir: str | None,
+    n_samples: int | None,
+    seed: int | None,
+    cfg: dict,
+) -> None:
+    slurm_cfg = cfg.get("slurm", {}) or {}
+    partition = slurm_cfg.get("partition", "TEST")
+    time_str = slurm_cfg.get("time", "00:30:00")
+    mem_gb = int(slurm_cfg.get("mem_gb", 16))
+    cpus = int(slurm_cfg.get("cpus", 2))
+    gpus = int(slurm_cfg.get("gpus", 1))
+    conda_env = slurm_cfg.get("conda_env", "thesis")
+    job_name = slurm_cfg.get("job_name", "eval_flows")
+
+    logs_root = (REPO_ROOT / "logs").resolve()
+    logs_root.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    out_log = logs_root / f"{job_name}_flow_eval_{ts}_%j.out"
+    err_log = logs_root / f"{job_name}_flow_eval_{ts}_%j.err"
+
+    script_lines = [
+        "#!/bin/bash",
+        f"#SBATCH --job-name={job_name}_eval",
+        f"#SBATCH --partition={partition}",
+        f"#SBATCH --cpus-per-task={cpus}",
+        f"#SBATCH --mem={mem_gb}G",
+        f"#SBATCH --time={time_str}",
+        f"#SBATCH --output={out_log}",
+        f"#SBATCH --error={err_log}",
+    ]
+    if gpus > 0:
+        script_lines.insert(6, f"#SBATCH --gres=gpu:{gpus}")
+
+    cmd = [
+        "python",
+        str(Path(__file__).resolve()),
+        "--config",
+        str(cfg_path),
+        "--outdir",
+        str(outdir),
+        "--split",
+        split,
+        "--mode",
+        "local",
+    ]
+    if save_dir:
+        cmd += ["--save-dir", str(save_dir)]
+    if n_samples is not None:
+        cmd += ["--n-samples", str(n_samples)]
+    if seed is not None:
+        cmd += ["--seed", str(seed)]
+
+    script_lines += [
+        f"cd \"{REPO_ROOT}\"",
+        'source "$HOME/miniconda3/etc/profile.d/conda.sh"',
+        f"conda activate {conda_env}",
+        'echo "[env] host=$(hostname) date=$(date)"',
+        " ".join(cmd),
+    ]
+
+    sb_script = "\n".join(script_lines) + "\n"
+    print("[eval-flows][slurm] sbatch script:\n")
+    print(sb_script)
+
+    res = subprocess.run(["sbatch"], input=sb_script.encode("utf-8"), check=False, capture_output=True)
+    if res.returncode != 0:
+        print(res.stdout.decode())
+        print(res.stderr.decode(), file=sys.stderr)
+        res.check_returncode()
+    else:
+        print(res.stdout.decode().strip())
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Evaluate a trained flow on a held-out split")
     ap.add_argument("--config", required=True, help="NF config YAML (same schema as train_flows)")
     ap.add_argument("--outdir", required=True, help="NF run directory (contains model.pt)")
     ap.add_argument("--split", default="test", choices=["train", "val", "test"], help="Split to evaluate")
     ap.add_argument("--save-dir", default=None, help="Where to write eval outputs (default: outdir/eval_<split>)")
+    ap.add_argument("--n-samples", type=int, default=None, help="Flow samples per row for sigma estimate (default: cfg nf_eval.n_samples or 200)")
+    ap.add_argument("--seed", type=int, default=None, help="Seed for flow sampling (default: cfg nf_eval.seed or data.split_seed)")
+    ap.add_argument("--mode", choices=["local", "slurm"], default="local", help="Run locally or submit a slurm job")
     args = ap.parse_args()
 
     cfg = _load_yaml(Path(args.config))
+    if args.mode == "slurm":
+        submit_slurm(Path(args.config), Path(args.outdir), args.split, args.save_dir, args.n_samples, args.seed, cfg)
+        return
     # Optional single-source pointer: infer base paths from base_run_dir/run_dir when provided
     base_run_dir_raw = cfg.get("base_run_dir") or cfg.get("base_run", {}).get("run_dir")
     if base_run_dir_raw:
@@ -224,7 +353,7 @@ def main() -> None:
     meta = _load_preproc_meta(meta_path)
 
     data_csv = Path(cfg["data"]["csv_path"]).resolve()
-    X_all, y_tr_all, extra = _build_features_from_meta(data_csv, meta)
+    X_all, y_tr_all, extra = _build_features_from_meta(data_csv, meta, cfg.get("data", {}))
     y_meta = extra["y_meta"]
     df = extra["df"]
 
@@ -317,6 +446,21 @@ def main() -> None:
     mu_orig = inverse_target(mu_t.reshape(-1, 1), y_meta).reshape(-1)
     sigma_ale_orig = _delta_sigma_orig(head_type, scale_t, mu_orig, y_meta)
 
+    # NF-derived sigma: std of z samples scaled by base std in transformed space.
+    nf_eval_cfg = cfg.get("nf_eval", {}) or cfg.get("evaluation", {}) or {}
+    n_samples = int(args.n_samples or nf_eval_cfg.get("n_samples", nf_eval_cfg.get("n_nf_samples", 200)))
+    seed = args.seed
+    if seed is None:
+        seed = nf_eval_cfg.get("seed")
+    if seed is None:
+        seed = (cfg.get("data", {}) or {}).get("split_seed")
+    _set_seed(None if seed is None else int(seed))
+    batch_size = int(nf_eval_cfg.get("batch_size", cfg.get("training", {}).get("batch_size", 1024)))
+    batch_size = max(1, batch_size)
+    z_std = _sample_z_std(flow, Xs, n_samples=n_samples, batch_size=batch_size, device=device)
+    sigma_nf_t = scale_t * z_std
+    sigma_nf_orig = _delta_sigma_orig(head_type, sigma_nf_t, mu_orig, y_meta)
+
     save_dir = Path(args.save_dir).resolve() if args.save_dir else (outdir / f"eval_{args.split}")
     save_dir.mkdir(parents=True, exist_ok=True)
     out_csv = save_dir / f"flow_eval_{args.split}.csv"
@@ -329,10 +473,14 @@ def main() -> None:
             "y_true_orig",
             "y_pred_base_orig",
             "sigma_base_orig",
+            "sigma_nf_orig",
+            "z_std",
             "z_raw",
             "log_prob_z_raw",
         ])
-        for rid, yt_o, mu_o, sig_o, z_i, lp in zip(id_out, y_true_orig, mu_orig, sigma_ale_orig, z, log_prob_np):
+        for rid, yt_o, mu_o, sig_o, sig_nf_o, z_s, z_i, lp in zip(
+            id_out, y_true_orig, mu_orig, sigma_ale_orig, sigma_nf_orig, z_std, z, log_prob_np
+        ):
             writer.writerow([
                 int(rid),
                 args.split,
@@ -340,6 +488,8 @@ def main() -> None:
                 float(yt_o),
                 float(mu_o),
                 float(sig_o) if np.isfinite(sig_o) else np.nan,
+                float(sig_nf_o) if np.isfinite(sig_nf_o) else np.nan,
+                float(z_s) if np.isfinite(z_s) else np.nan,
                 float(z_i),
                 float(lp),
             ])
@@ -349,6 +499,8 @@ def main() -> None:
         "n": int(len(id_out)),
         "mean_nll": mean_nll,
         "head_type": head_type,
+        "n_samples": int(n_samples),
+        "seed": None if seed is None else int(seed),
     }
     with (save_dir / "metrics.json").open("w") as f:
         json.dump(metrics, f, indent=2)

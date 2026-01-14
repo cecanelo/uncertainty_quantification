@@ -171,7 +171,34 @@ def main() -> None:
     io_cfg = cfg.get("io", {})
 
     study = optuna.load_study(study_name=study_cfg["name"], storage=study_cfg["storage"])
-    best = study.best_trial
+    trials = study.get_trials(deepcopy=False)
+    # Lightweight failure summary to surface OOMs and other issues.
+    try:
+        from optuna.trial import TrialState
+        n_total = len(trials)
+        n_complete = sum(t.state == TrialState.COMPLETE for t in trials)
+        n_failed = sum(t.state == TrialState.FAIL for t in trials)
+        n_pruned = sum(t.state == TrialState.PRUNED for t in trials)
+    except Exception:
+        n_total = len(trials)
+        n_complete = n_failed = n_pruned = 0
+
+    n_oom = 0
+    for t in trials:
+        attrs = getattr(t, "user_attrs", {}) or {}
+        if attrs.get("oom") or attrs.get("failure_kind") == "oom":
+            n_oom += 1
+
+    if n_total:
+        print(f"[hpo_export_best] Study trials: total={n_total} complete={n_complete} failed={n_failed} pruned={n_pruned}")
+    if n_oom:
+        print(f"[warn] Detected {n_oom} OOM-killed trials in Optuna metadata for study '{study_cfg['name']}'.")
+
+    try:
+        best = study.best_trial
+    except Exception as e:
+        print(f"[error] No best trial available for study '{study_cfg['name']}': {type(e).__name__}: {e}")
+        raise
 
     # Helper: map optuna trial number -> value for quick lookup
     trial_values = {t.number: t.value for t in study.trials if t.value is not None}

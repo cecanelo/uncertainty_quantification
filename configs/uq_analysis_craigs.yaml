@@ -1,0 +1,93 @@
+# Uncertainty analysis config: Craigslist dataset
+#
+# This is a dataset-specific config intended to drive `notebooks/uq_analysis_v2.ipynb`.
+# It mirrors the structure expected by `notebooks/uq_analysis.ipynb`, but is meant to
+# be edited per dataset (one config per dataset).
+
+settings:
+  dataset_key: craigs
+  # Where eval artifacts live for this dataset.
+  eval_root: outputs/craigs_evals
+  # Prefix inserted into run_patterns (e.g. "_l", "_m", "_xs")
+  run_prefix: "_l_craigs"
+
+  dido_mode: logistic
+  n_reliability_bins: 10
+  n_mc_samples: 50
+  n_ensemble_members: 10
+  n_nf_samples: 100
+  # Calibration objective for fitting (alpha, beta) on ID:val.
+  # Options:
+  # - moment: match average squared error to predicted variance (default)
+  # - nll   : choose beta by minimizing Gaussian NLL (alpha via closed-form scale)
+  # - crps  : choose alpha/beta by minimizing Gaussian CRPS
+  calib_objective: nll
+
+# Labels must match what eval scripts used in filenames (e.g., `ood_<label>_test.csv`).
+ood_labels: ["knn"]
+
+large_error:
+  mode: quantile
+  baseline_method: point
+  quantile: 0.95
+
+# Optional explicit overrides. If null, the notebook will use `run_patterns` discovery.
+runs:
+  point: outputs/craigs_evals/point_l_craigs_20260112-204108_507266
+  laplace_analytic: outputs/craigs_evals/lpl_l_craigs_20260112-204108_507267
+  laplace_mc: outputs/craigs_evals/lpl_l_craigs_20260112-204108_507267
+  gauss_analytic: outputs/craigs_evals/gau_l_craigs_20260112-204108_507268
+  gauss_mc: outputs/craigs_evals/gau_l_craigs_20260112-204108_507268
+  laplace_ensemble: outputs/craigs_evals/esm_laplace_lpl_l_craigs_20260114-103122_508312
+  gauss_ensemble: outputs/craigs_evals/esm_gauss_gau_l_craigs_20260114-103122_508318
+  nf_laplace: outputs/craigs_evals/nf_lpl_l_craigs_20260114-091156_508310
+  nf_gauss: outputs/craigs_evals/nf_gau_l_craigs_20260114-092400_508311
+  dido_laplace: outputs/craigs_evals/dido_lpl_l_craigs_20260113-094017_507830
+  dido_gauss: outputs/craigs_evals/dido_gau_l_craigs_20260113-094023_507831
+
+run_patterns:
+  point: point{prefix}*
+  laplace_analytic: lpl{prefix}*
+  laplace_mc: lpl{prefix}*
+  gauss_analytic: gau{prefix}*
+  gauss_mc: gau{prefix}*
+  laplace_ensemble: esm_laplace_lpl{prefix}*
+  gauss_ensemble: esm_gauss_gau{prefix}*
+  nf_laplace: nf_lpl{prefix}*
+  nf_gauss: nf_gau{prefix}*
+  dido_laplace: dido_lpl{prefix}*
+  dido_gauss: dido_gau{prefix}*
+
+enable_methods:
+  point: true
+  laplace_analytic: true
+  laplace_mc: true
+  gauss_analytic: true
+  gauss_mc: true
+  laplace_ensemble: true
+  gauss_ensemble: true
+  nf_laplace: true
+  nf_gauss: true
+  dido_laplace: true
+  dido_gauss: true
+
+cohorts:
+  enabled: true
+  dataset_csv: datasets/craigslist_cleaned_FULL.csv
+  id_col: id
+
+  # Used to build `age_bucket` for cohort analyses.
+  age_col: age_years
+  age_bins: [0, 2, 4, 7, 10, 15, 25, 100]
+
+  min_cohort_n: 100
+  cohort_defs:
+    manufacturer: [manufacturer]
+    manufacturer+model: [manufacturer, model]
+    manufacturer+age_bucket: [manufacturer]
+    region: [region]
+    state: [state]
+    type: [type]
+    fuel: [fuel]
+    transmission: [transmission]
+    drive: [drive]

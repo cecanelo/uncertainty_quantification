@@ -1,16 +1,16 @@
 study:
-    name: "gau_l"
+    name: "gau_l_craigs"
     storage: "sqlite:///optuna_studies/hpo.db"
     direction: "minimize"
     resume: true
 
 budget:
-    n_trials: 50                # small run now; increase to 20–50 for full HPO
+    n_trials: 50                # match Craigs L
 
 resources:
     partition: "STUD"          # small queue for quick runs
     time: "00:50:00"
-    mem_gb: 30
+    mem_gb: 32
     cpus_per_task: 4
     gpus: 1
     conda_env: "thesis"
@@ -27,6 +27,7 @@ base_config:
     train_script_path: "scripts/train_regression.py"
 
 trial_overrides:
+    dataset: "craigs"
     training:
         eval_after_train: false
 
@@ -61,4 +62,11 @@ post_run:
     train_overrides:
         training:
             eval_after_train: true
+            mc_eval:
+                enabled: true
+                n_samples: 50
+                batch_size: 512
+                include_samples: true
+            early_stopping:
+                enabled: false
     latest_pointer_dir: "outputs/best_hparams/{study}"

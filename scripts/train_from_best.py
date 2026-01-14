@@ -412,17 +412,22 @@ def main() -> None:
         out_log = logs_dir / f"{log_stub}_%j.out"
         err_log = logs_dir / f"{log_stub}_%j.err"
 
-        gres_line = f"#SBATCH --gres=gpu:{gpus}" if gpus and gpus > 0 else ""
+        # Keep this as either an empty string or a full directive *ending with a newline*
+        # so we don't accidentally insert a blank line between SBATCH directives.
+        gres_line = f"#SBATCH --gres=gpu:{gpus}\n" if gpus and gpus > 0 else ""
 
+        # NOTE: All `#SBATCH` directives must appear before any non-comment commands
+        # (otherwise Slurm may ignore them, e.g. `--partition`).
         sbatch_script = f"""#!/bin/bash
 #SBATCH --job-name={job_name}
 #SBATCH --partition={partition}
 #SBATCH --cpus-per-task={cpus}
 #SBATCH --mem={mem_gb}G
-{gres_line}
-#SBATCH --time={time_str}
+{gres_line}#SBATCH --time={time_str}
 #SBATCH --output={out_log}
 #SBATCH --error={err_log}
+
+set -euo pipefail
 
 cd "{repo_root}"
 
@@ -432,7 +437,26 @@ conda activate {conda_env}
 echo "[env] host=$(hostname) date=$(date)"
 OUTDIR="{final_outdir}"
 echo "[env] RUN_DIR=$OUTDIR"
+mkdir -p "$OUTDIR"
+
+set +e
 {sys.executable} {trainer_script} --config "{derived_cfg_path}" --outdir "$OUTDIR"
+RET=$?
+set -e
+
+if [ "$RET" -ne 0 ]; then
+  TS="$(date -Iseconds)"
+  KIND="nonzero_exit"
+  if [ "$RET" -eq 137 ] || [ "$RET" -eq 9 ]; then
+    KIND="oom"
+    echo "[train_from_best][OOM] Likely OOM-killed (exit_code=$RET)" >&2
+    echo "Likely OOM kill (SIGKILL). Consider increasing mem_gb or reducing batch_size." > "$OUTDIR/OOM_DETECTED"
+  else
+    echo "[train_from_best][ERROR] Training failed (exit_code=$RET)" >&2
+  fi
+  printf '{{"kind":"%s","exit_code":%s,"slurm_job_id":"%s","ts":"%s"}}' "$KIND" "$RET" "${{SLURM_JOB_ID:-}}" "$TS" > "$OUTDIR/failure.json"
+  exit "$RET"
+fi
 """
 
         print("[train_from_best] Submitting sbatch with script:")

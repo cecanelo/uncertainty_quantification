@@ -15,7 +15,7 @@ run:
 
 knn_ood:
   csv_path: "datasets/rv_dataset_2024.csv"
-  preproc_meta: "outputs/trainings/training_lpl_xs_vw/lpl_xs_vw_20260110-175325_505269/preproc_meta.json"
+  preproc_meta: "outputs/trainings/training_vw_point_l_vw/vw_point_l_vw_20260111-175135_505817/preproc_meta.json"
   out_dir: "datasets/knn_ood"
   out_prefix: "vw"
 

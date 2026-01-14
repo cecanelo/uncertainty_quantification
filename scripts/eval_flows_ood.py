@@ -29,8 +29,11 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any, Dict, Tuple
+from datetime import datetime
 
 import numpy as np
 import pandas as pd
@@ -77,6 +80,46 @@ def _delta_sigma_orig(
         # dy/dz = exp(z) ≈ y + 1, approximate with predicted y
         return (mu_orig + 1.0) * sigma_z
     return sigma_z
+
+
+def _set_seed(seed: int | None) -> None:
+    if seed is None:
+        return
+    import random
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+
+def _sample_z_std(
+    flow: torch.nn.Module,
+    X: np.ndarray,
+    *,
+    n_samples: int,
+    batch_size: int,
+    device: torch.device,
+) -> np.ndarray:
+    if n_samples <= 0:
+        return np.full((X.shape[0],), np.nan, dtype=np.float32)
+    n = X.shape[0]
+    out = np.empty(n, dtype=np.float32)
+    for i in range(0, n, batch_size):
+        xb = torch.tensor(X[i : i + batch_size], dtype=torch.float32, device=device)
+        samples = flow.sample(n_samples, context=xb)
+        if samples.dim() == 3:
+            if samples.shape[0] == n_samples:
+                std = samples.std(dim=0, unbiased=False)
+            elif samples.shape[1] == n_samples:
+                std = samples.std(dim=1, unbiased=False)
+            else:
+                std = samples.std(dim=0, unbiased=False)
+        else:
+            std = torch.zeros((samples.shape[0], 1), device=samples.device)
+        std = std.squeeze(-1).detach().cpu().numpy()
+        out[i : i + len(std)] = std
+    return out
 
 
 def _build_features_ood(csv_path: Path, meta: dict) -> Tuple[np.ndarray, np.ndarray, Dict[str, str], pd.DataFrame]:
@@ -162,6 +205,86 @@ def _eval_base_on_ood(
     return head_type, mu_np, sigma_z
 
 
+def submit_slurm(
+    cfg_path: Path,
+    outdir: Path,
+    ood_csv: str | None,
+    ood_dir: str | None,
+    dataset_label: str | None,
+    n_samples: int | None,
+    seed: int | None,
+    cfg: dict,
+) -> None:
+    slurm_cfg = cfg.get("slurm", {}) or {}
+    partition = slurm_cfg.get("partition", "TEST")
+    time_str = slurm_cfg.get("time", "00:30:00")
+    mem_gb = int(slurm_cfg.get("mem_gb", 16))
+    cpus = int(slurm_cfg.get("cpus", 2))
+    gpus = int(slurm_cfg.get("gpus", 1))
+    conda_env = slurm_cfg.get("conda_env", "thesis")
+    job_name = slurm_cfg.get("job_name", "eval_flows_ood")
+
+    logs_root = (Path(__file__).resolve().parents[1] / "logs").resolve()
+    logs_root.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    out_log = logs_root / f"{job_name}_flow_eval_{ts}_%j.out"
+    err_log = logs_root / f"{job_name}_flow_eval_{ts}_%j.err"
+
+    script_lines = [
+        "#!/bin/bash",
+        f"#SBATCH --job-name={job_name}_eval",
+        f"#SBATCH --partition={partition}",
+        f"#SBATCH --cpus-per-task={cpus}",
+        f"#SBATCH --mem={mem_gb}G",
+        f"#SBATCH --time={time_str}",
+        f"#SBATCH --output={out_log}",
+        f"#SBATCH --error={err_log}",
+    ]
+    if gpus > 0:
+        script_lines.insert(6, f"#SBATCH --gres=gpu:{gpus}")
+
+    cmd = [
+        "python",
+        str(Path(__file__).resolve()),
+        "--config",
+        str(cfg_path),
+        "--outdir",
+        str(outdir),
+        "--mode",
+        "local",
+    ]
+    if ood_csv:
+        cmd += ["--ood-csv", ood_csv]
+    if ood_dir:
+        cmd += ["--ood-dir", ood_dir]
+    if dataset_label:
+        cmd += ["--dataset-label", dataset_label]
+    if n_samples is not None:
+        cmd += ["--n-samples", str(n_samples)]
+    if seed is not None:
+        cmd += ["--seed", str(seed)]
+
+    script_lines += [
+        f"cd \"{Path(__file__).resolve().parents[1]}\"",
+        'source "$HOME/miniconda3/etc/profile.d/conda.sh"',
+        f"conda activate {conda_env}",
+        'echo "[env] host=$(hostname) date=$(date)"',
+        " ".join(cmd),
+    ]
+
+    sb_script = "\n".join(script_lines) + "\n"
+    print("[eval-flows-ood][slurm] sbatch script:\n")
+    print(sb_script)
+
+    res = subprocess.run(["sbatch"], input=sb_script.encode("utf-8"), check=False, capture_output=True)
+    if res.returncode != 0:
+        print(res.stdout.decode())
+        print(res.stderr.decode(), file=sys.stderr)
+        res.check_returncode()
+    else:
+        print(res.stdout.decode().strip())
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Evaluate an NF model on an OOD CSV.")
     ap.add_argument("--config", required=True, help="NF used_config.yaml (from train_flows)")
@@ -170,6 +293,9 @@ def main() -> None:
     group.add_argument("--ood-csv", help="Single OOD CSV to evaluate")
     group.add_argument("--ood-dir", help="Directory with multiple *_ood_*.csv files")
     ap.add_argument("--dataset-label", help="Label to use for this OOD set (only with --ood-csv)")
+    ap.add_argument("--n-samples", type=int, default=None, help="Flow samples per row for sigma estimate (default: cfg nf_eval.n_samples or 200)")
+    ap.add_argument("--seed", type=int, default=None, help="Seed for flow sampling (default: cfg nf_eval.seed or data.split_seed)")
+    ap.add_argument("--mode", choices=["local", "slurm"], default="local", help="Run locally or submit a slurm job")
     args = ap.parse_args()
 
     cfg_path = Path(args.config).resolve()
@@ -182,6 +308,9 @@ def main() -> None:
         raise FileNotFoundError(f"NF checkpoint model.pt not found in {nf_outdir}")
 
     cfg = _load_nf_cfg(cfg_path)
+    if args.mode == "slurm":
+        submit_slurm(cfg_path, nf_outdir, args.ood_csv, args.ood_dir, args.dataset_label, args.n_samples, args.seed, cfg)
+        return
 
     # Resolve base artifacts and run paths as in train_flows/eval_flows
     base_run_cfg = cfg.get("base_run", {}) or {}
@@ -266,6 +395,19 @@ def main() -> None:
         y_true_orig = inverse_target(y_tr_ood.reshape(-1, 1), y_meta).reshape(-1)
         mu_orig = inverse_target(mu_t.reshape(-1, 1), y_meta).reshape(-1)
         sigma_ale_orig = _delta_sigma_orig(head_type, sigma_t, mu_orig, y_meta)
+        nf_eval_cfg = cfg.get("nf_eval", {}) or cfg.get("evaluation", {}) or {}
+        n_samples = int(args.n_samples or nf_eval_cfg.get("n_samples", nf_eval_cfg.get("n_nf_samples", 200)))
+        seed = args.seed
+        if seed is None:
+            seed = nf_eval_cfg.get("seed")
+        if seed is None:
+            seed = (cfg.get("data", {}) or {}).get("split_seed")
+        _set_seed(None if seed is None else int(seed))
+        batch_size = int(nf_eval_cfg.get("batch_size", cfg.get("training", {}).get("batch_size", 1024)))
+        batch_size = max(1, batch_size)
+        z_std = _sample_z_std(flow, X_ood, n_samples=n_samples, batch_size=batch_size, device=device)
+        sigma_nf_t = sigma_t * z_std
+        sigma_nf_orig = _delta_sigma_orig(head_type, sigma_nf_t, mu_orig, y_meta)
 
         # 6) Write per-row outputs under evals_root/run_tag
         eval_cfg = cfg.get("evaluation", {}) or {}
@@ -291,12 +433,14 @@ def main() -> None:
                     "y_true_orig",
                     "y_pred_base_orig",
                     "sigma_base_orig",
+                    "sigma_nf_orig",
+                    "z_std",
                     "z_raw",
                     "log_prob_z_raw",
                 ]
             )
-            for rid, yt_o, mu_o, sig_o, z_i, lp in zip(
-                ids, y_true_orig, mu_orig, sigma_ale_orig, z, log_prob_np
+            for rid, yt_o, mu_o, sig_o, sig_nf_o, z_s, z_i, lp in zip(
+                ids, y_true_orig, mu_orig, sigma_ale_orig, sigma_nf_orig, z_std, z, log_prob_np
             ):
                 writer.writerow(
                     [
@@ -306,6 +450,8 @@ def main() -> None:
                         float(yt_o),
                         float(mu_o),
                         float(sig_o) if np.isfinite(sig_o) else np.nan,
+                        float(sig_nf_o) if np.isfinite(sig_nf_o) else np.nan,
+                        float(z_s) if np.isfinite(z_s) else np.nan,
                         float(z_i),
                         float(lp),
                     ]
@@ -317,6 +463,8 @@ def main() -> None:
             "n": int(len(ids)),
             "mean_nll": mean_nll,
             "head_type": head_type,
+            "n_samples": int(n_samples),
+            "seed": None if seed is None else int(seed),
         }
         with (save_dir / f"metrics_ood_{label}.json").open("w") as f:
             json.dump(metrics, f, indent=2)

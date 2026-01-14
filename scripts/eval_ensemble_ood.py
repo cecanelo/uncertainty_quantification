@@ -28,6 +28,12 @@ import numpy as np
 import torch
 import yaml
 
+# Allow both package and script-level import
+try:
+    from .config_resolver import load_and_resolve_config  # type: ignore
+except Exception:
+    from config_resolver import load_and_resolve_config  # type: ignore
+
 from data import DataConfig, _prepare_frame, _apply_encoders, _target_transform, inverse_target
 from model_base import MLPRegressor
 
@@ -55,7 +61,7 @@ def _delta_sigma_orig(head_type: str, sigma_z: Optional[np.ndarray], mu_orig: np
     return sigma_z
 
 
-def _build_features(meta: dict, ood_csv: Path, data_cfg: dict) -> Tuple[np.ndarray, np.ndarray, dict]:
+def _load_ood_frame(ood_csv: Path, data_cfg: dict) -> Tuple[np.ndarray, dict, np.ndarray]:
     dc = DataConfig(
         csv_path=str(ood_csv),
         target_col=data_cfg.get("target_col", "price"),
@@ -64,14 +70,7 @@ def _build_features(meta: dict, ood_csv: Path, data_cfg: dict) -> Tuple[np.ndarr
     df = _prepare_frame(dc)
     y = df[dc.target_col].astype(float).to_numpy()
     y_tr, y_meta = _target_transform(y, dc.target_transform)
-
-    enc = meta["encoders"]
-    numeric_cols = meta.get("numeric_cols", [])
-    onehot_cols = meta.get("onehot_cols", [])
-    hash_cols = meta.get("hash_cols", [])
-
-    X = _apply_encoders(df, numeric_cols, onehot_cols, hash_cols, enc)
-    return X, y_tr.reshape(-1, 1), {"y_meta": y_meta, "df": df}
+    return y_tr.reshape(-1, 1), y_meta, df
 
 
 def _member_paths(ensemble_root: Path) -> List[Path]:
@@ -183,34 +182,34 @@ def evaluate_ood(
     ood_csv: Path,
     dataset_label: str,
 ) -> None:
-    base_cfg = load_yaml(cfg_path)
+    base_cfg = load_and_resolve_config(str(cfg_path))
     members = _member_paths(ensemble_root)
-    first_member = members[0]
-
-    meta_path = first_member / "preproc_meta.json"
-    if not meta_path.exists():
-        raise FileNotFoundError(f"preproc_meta.json not found in {first_member}")
-    meta = load_json(meta_path)
-
     data_cfg = base_cfg["data"]
     model_cfg = base_cfg["model"]
     head_type = model_cfg.get("head_type", "point").lower()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    X, y_tr, aux = _build_features(meta, ood_csv, data_cfg)
-    y_meta = aux["y_meta"]
-    df = aux["df"]
+    y_tr, y_meta, df = _load_ood_frame(ood_csv, data_cfg)
     ids = df["id"].to_numpy() if "id" in df.columns else np.arange(len(df), dtype=int)
 
-    in_dim = int(meta["feature_dim"])
     n_members = len(members)
-
-    Xs = torch.tensor(X, dtype=torch.float32)
-    ys = torch.tensor(y_tr, dtype=torch.float32)
 
     member_means = []
     member_scales = []
     for mdir in members:
+        meta_path = mdir / "preproc_meta.json"
+        if not meta_path.exists():
+            raise FileNotFoundError(f"preproc_meta.json not found in {mdir}")
+        meta = load_json(meta_path)
+
+        enc = meta["encoders"]
+        numeric_cols = meta.get("numeric_cols", [])
+        onehot_cols = meta.get("onehot_cols", [])
+        hash_cols = meta.get("hash_cols", [])
+        X = _apply_encoders(df, numeric_cols, onehot_cols, hash_cols, enc)
+        Xs = torch.tensor(X, dtype=torch.float32)
+
+        in_dim = int(meta["feature_dim"])
         model = _load_model(mdir, in_dim, model_cfg, device)
         mu_z, sigma_z = _run_member_preds(model, Xs, head_type, device)
         member_means.append(mu_z)
@@ -234,7 +233,12 @@ def evaluate_ood(
     sigma_epi_orig = _delta_sigma_orig(head_type, sigma_epi_z, y_pred_orig, y_meta)
 
     evals_root = base_cfg.get("io", {}).get("evals_root", "outputs/evals")
-    eval_dir = Path(evals_root) / ensemble_root.name
+    evals_root = Path(evals_root)
+    dataset = base_cfg.get("dataset") or (base_cfg.get("data") or {}).get("dataset")
+    # If ensemble members wrote into outputs/evals/<tag>, redirect to outputs/{dataset}_evals.
+    if dataset and "outputs/evals" in evals_root.as_posix():
+        evals_root = Path("outputs") / f"{dataset}_evals"
+    eval_dir = evals_root / ensemble_root.name
     eval_dir.mkdir(parents=True, exist_ok=True)
     out_path = eval_dir / f"ensemble_preds_ood_{dataset_label}.csv"
     _write_csv(out_path, ids, f"ood_{dataset_label}", head_type, n_members, y_true_orig, y_pred_orig, sigma_ale_orig, sigma_epi_orig)

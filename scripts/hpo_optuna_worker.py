@@ -43,6 +43,63 @@ import yaml
 
 
 # ----------------------- small utilities ----------------------- #
+def _is_probable_oom_exit_code(returncode: int) -> bool:
+    """
+    Heuristics for OOM-killed processes.
+
+    Python's subprocess returncode conventions:
+      - negative values mean "terminated by signal" (e.g. -9 = SIGKILL)
+      - 137 is commonly used by shells for SIGKILL (128 + 9)
+    """
+    if returncode is None:
+        return False
+    if returncode == -9:
+        return True
+    if returncode == 137:
+        return True
+    if returncode < 0 and abs(returncode) == 9:
+        return True
+    if returncode >= 128 and (returncode - 128) == 9:
+        return True
+    return False
+
+
+def _record_trial_failure(trial: optuna.trial.Trial, trial_dir: Path, returncode: int) -> None:
+    kind = "oom" if _is_probable_oom_exit_code(returncode) else "nonzero_exit"
+
+    # Persist a durable marker in the trial directory for later audits.
+    try:
+        study_name = str(getattr(getattr(trial, "study", None), "study_name", ""))  # type: ignore[attr-defined]
+    except Exception:
+        study_name = ""
+    payload = {
+        "failure_kind": kind,
+        "returncode": int(returncode),
+        "slurm_job_id": os.environ.get("SLURM_JOB_ID", ""),
+        "slurm_array_task_id": os.environ.get("SLURM_ARRAY_TASK_ID", ""),
+        "study_name": study_name,
+        "trial_number": int(trial.number),
+    }
+    try:
+        save_json(payload, str(trial_dir / "failure.json"))
+        if kind == "oom":
+            (trial_dir / "OOM_DETECTED").write_text(
+                "Likely OOM kill (SIGKILL). Consider increasing mem_gb or reducing batch_size.\n"
+            )
+    except Exception:
+        # Never let failure recording crash the worker.
+        pass
+
+    # Also store on the trial for programmatic summaries (export scripts, notebooks, etc.).
+    try:
+        trial.set_user_attr("failure_kind", kind)
+        trial.set_user_attr("returncode", int(returncode))
+        if kind == "oom":
+            trial.set_user_attr("oom", True)
+    except Exception:
+        pass
+
+
 def load_yaml(path: str) -> dict:
     with open(path, "r") as f:
         return yaml.safe_load(f)
@@ -387,6 +444,12 @@ def main() -> None:
                         raise optuna.exceptions.TrialPruned(f"Pruned at step={last_epoch_reported}")
                 if ret is not None:
                     if ret != 0:
+                        _record_trial_failure(trial, trial_dir, int(ret))
+                        if _is_probable_oom_exit_code(int(ret)):
+                            print(
+                                f"[HPO][OOM] Trial {trial.number} likely OOM-killed (returncode={ret}).",
+                                file=sys.stderr,
+                            )
                         raise RuntimeError(f"train.py failed with exit code {ret}")
                     break
                 time.sleep(0.5)

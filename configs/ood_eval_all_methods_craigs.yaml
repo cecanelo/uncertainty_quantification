@@ -1,6 +1,6 @@
 # kNN-only OOD evaluation config for Craigslist runs.
 
-run_tag: "_l_"  # substring used to select runs, e.g., "_m_", "_l_"
+run_tag: "_l_craigs_"  # substring used to select runs, e.g., "_m_", "_l_"
 
 methods:
   regression:

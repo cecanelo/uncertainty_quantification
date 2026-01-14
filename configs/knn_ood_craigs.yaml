@@ -15,7 +15,7 @@ run:
 
 knn_ood:
   csv_path: "datasets/craigslist_cleaned_FULL.csv"
-  preproc_meta: outputs/trainings/training_point_smoke/craigs_smoke_503683/preproc_meta.json  # <-- replace with actual path
+  preproc_meta: "outputs/trainings/training_point_l_craigs/point_l_craigs_20260112-204108_507266/preproc_meta.json"  # set to the preproc_meta.json from the Craigslist base run
   out_dir: "datasets/knn_ood"
   out_prefix: "craigs"
 

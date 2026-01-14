@@ -1,0 +1,87 @@
+# Uncertainty analysis config: VW (rv_dataset_2024.csv)
+#
+# This is a dataset-specific config intended to drive `notebooks/uq_analysis_v2.ipynb`.
+# It targets the VW eval roots (dataset-tagged outputs).
+
+settings:
+  dataset_key: vw
+  eval_root: outputs/vw_evals
+  # Your run dirs are like `lpl_l_vw_*`, `gau_l_vw_*`, ...
+  run_prefix: "_l_vw"
+
+  dido_mode: logistic
+  n_reliability_bins: 10
+  n_mc_samples: 50
+  n_ensemble_members: 10
+  n_nf_samples: 200
+  # Calibration objective for fitting (alpha, beta) on ID:val.
+  # Options:
+  # - moment: match average squared error to predicted variance (default)
+  # - nll   : choose beta by minimizing Gaussian NLL (alpha via closed-form scale)
+  # - crps  : choose alpha/beta by minimizing Gaussian CRPS
+  calib_objective: nll
+
+ood_labels: ["knn"]
+
+large_error:
+  mode: fixed
+  # abs(y_true - mu) > threshold in target/original space
+  threshold: 7.5
+
+runs:
+  # Explicit run directories (pinned for reproducibility).
+  # These are relative to PROJECT_ROOT and must exist under `settings.eval_root`.
+  point: outputs/vw_evals/vw_point_l_vw_20260111-175135_505817
+  laplace_analytic: outputs/vw_evals/lpl_l_vw_20260111-175136_505818
+  laplace_mc: outputs/vw_evals/lpl_l_vw_20260111-175136_505818
+  gauss_analytic: outputs/vw_evals/gau_l_vw_20260111-175136_505819
+  gauss_mc: outputs/vw_evals/gau_l_vw_20260111-175136_505819
+  laplace_ensemble: outputs/vw_evals/esm_laplace_lpl_l_vw_20260111-181557_505846
+  gauss_ensemble: outputs/vw_evals/esm_gauss_gau_l_vw_20260111-181557_505847
+  nf_laplace: outputs/vw_evals/nf_lpl_l_vw_20260112-064623_506404
+  nf_gauss: outputs/vw_evals/nf_gau_l_vw_20260112-064627_506405
+  dido_laplace: outputs/vw_evals/dido_lpl_l_vw_20260112-082257_506524
+  dido_gauss: outputs/vw_evals/dido_gau_l_vw_20260112-082257_506525
+
+run_patterns:
+  # VW point runs are named like `vw_point_l_vw_<ts>_<jobid>`.
+  point: vw_point{prefix}*
+  laplace_analytic: lpl{prefix}*
+  laplace_mc: lpl{prefix}*
+  gauss_analytic: gau{prefix}*
+  gauss_mc: gau{prefix}*
+  laplace_ensemble: esm_laplace_lpl{prefix}*
+  gauss_ensemble: esm_gauss_gau{prefix}*
+  nf_laplace: nf_lpl{prefix}*
+  nf_gauss: nf_gau{prefix}*
+  dido_laplace: dido_lpl{prefix}*
+  dido_gauss: dido_gau{prefix}*
+
+enable_methods:
+  point: true
+  laplace_analytic: true
+  laplace_mc: true
+  gauss_analytic: true
+  gauss_mc: true
+  laplace_ensemble: true
+  gauss_ensemble: true
+  nf_laplace: true
+  nf_gauss: true
+  dido_laplace: true
+  dido_gauss: true
+
+cohorts:
+  enabled: true
+  dataset_csv: datasets/rv_dataset_2024.csv
+  id_col: id
+
+  age_col: age
+  age_bins: [0, 10, 20, 30, 40, 50, 60, 100]
+
+  min_cohort_n: 100
+  cohort_defs:
+    # vda_make: [vda_make]
+    vda_make+vda_model: [vda_make, vda_model]
+    # fuel: [fuel]
+    # latest_sales_quarter: [latest_sales_quarter]
+    mbv_model: [mbv_model]

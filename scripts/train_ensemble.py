@@ -86,6 +86,8 @@ def _build_member_config(
     member_idx: int,
     seed: int,
     member_outdir: Path,
+    *,
+    fixed_split_seed: int | None = None,
     overrides: Dict[str, Any] | None = None,
     evals_root: Path | None = None,
 ) -> Dict[str, Any]:
@@ -95,7 +97,11 @@ def _build_member_config(
 
     cfg["seed"] = int(seed)
     cfg.setdefault("data", {})
-    cfg["data"]["split_seed"] = int(seed)
+    # IMPORTANT: keep splits identical across members so encoders/vocabulary stay aligned.
+    if fixed_split_seed is not None:
+        cfg["data"]["split_seed"] = int(fixed_split_seed)
+    else:
+        cfg["data"]["split_seed"] = int(seed)
 
     # Wire IO outdir for preproc/meta and model artifacts
     cfg.setdefault("io", {})
@@ -248,6 +254,11 @@ def main() -> None:
     if base_cfg is None:
         base_cfg = load_yaml(cfg_path)
 
+    # Lock split_seed to the base config so all members share the same split/encoders.
+    base_split_seed = int(
+        base_cfg.get("data", {}).get("split_seed", base_cfg.get("seed", 42))
+    )
+
     # Allow wrapper to override SLURM settings (e.g., conda_env) so users don't have to edit base config
     if wrapper_cfg and "slurm" in wrapper_cfg:
         merged_slurm = dict(base_cfg.get("slurm", {}) or {})
@@ -359,7 +370,15 @@ def main() -> None:
         seed = base_seed + m_idx
         member_outdir = _member_outdir(ensemble_root, m_idx)
         member_outdir.mkdir(parents=True, exist_ok=True)
-        member_cfg = _build_member_config(base_cfg, m_idx, seed, member_outdir, member_overrides, evals_root)
+        member_cfg = _build_member_config(
+            base_cfg,
+            m_idx,
+            seed,
+            member_outdir,
+            fixed_split_seed=base_split_seed,
+            overrides=member_overrides,
+            evals_root=evals_root,
+        )
         member_cfg_path = member_outdir / "member_config.yaml"
         save_yaml(member_cfg, member_cfg_path)
         _run_member_local(member_cfg_path, member_outdir)
@@ -370,7 +389,15 @@ def main() -> None:
         seed = base_seed + m_idx
         member_outdir = _member_outdir(ensemble_root, m_idx)
         member_outdir.mkdir(parents=True, exist_ok=True)
-        member_cfg = _build_member_config(base_cfg, m_idx, seed, member_outdir, member_overrides, evals_root)
+        member_cfg = _build_member_config(
+            base_cfg,
+            m_idx,
+            seed,
+            member_outdir,
+            fixed_split_seed=base_split_seed,
+            overrides=member_overrides,
+            evals_root=evals_root,
+        )
         member_cfg_path = member_outdir / "member_config.yaml"
         save_yaml(member_cfg, member_cfg_path)
         _run_member_local(member_cfg_path, member_outdir)

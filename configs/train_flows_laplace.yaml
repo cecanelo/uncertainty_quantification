@@ -60,3 +60,7 @@ io:
 evaluation:
   after_train: true
   splits: ["test"]
+
+nf_eval:
+  n_samples: 200
+  seed: null  # defaults to data.split_seed when omitted
