@@ -13,7 +13,7 @@ settings:
   n_reliability_bins: 10
   n_mc_samples: 50
   n_ensemble_members: 10
-  n_nf_samples: 200
+  n_nf_samples: 100
   # Calibration objective for fitting (alpha, beta) on ID:val.
   # Options:
   # - moment: match average squared error to predicted variance (default)
