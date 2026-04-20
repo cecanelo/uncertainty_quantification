@@ -127,7 +127,7 @@ In domains like auto finance, insurance, or any regression-based risk system, kn
 
 ## Academic Context
 
-This work was developed as part of a Master's thesis in Data Analytics at Stiftung Universität Hildesheim, under the supervision of Prof. Dr. Dr. Lars Schmidt-Thieme.
+This work was developed as part of a Master's thesis in Data Analytics at Stiftung Universität Hildesheim, under the supervision of Prof. Dr. Dr. Lars Schmidt-Thieme, Ibram Abdelmalak and Jan Schnitker.
 
 ---
 
